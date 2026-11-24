@@ -55,6 +55,16 @@ git pull
 **注意**：`dsh-hmr` 不跟踪 junction 指向的目录，所以改了插件源码**不会**自动热重载，
 必须走上面两条之一。
 
+### 对账：这台机器在跑哪个版本
+
+`link:` 没有 lockfile 记录，所以版本就是 clone 的 HEAD：
+
+```powershell
+git -C C:\Users\<user>\Documents\dsh-plugins log --oneline -1
+```
+
+几台机器之间对不上时，先比这一行。
+
 ## 回滚某个插件
 
 ```powershell
