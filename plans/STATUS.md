@@ -32,7 +32,7 @@ scripts/link-plugins.mjs       把仓库里的插件接到 profile 上（幂等�
 
 ## 二、session-create（要做的事：评审未收尾，一行代码都还没写）
 
-方案文件：`plans/session-create/session-create-v7.md`（执行版）与 `session-create-v7-record.md`（评审记录，执行者不要读）。
+方案文件：`plans/session-create/session-create-v8.md`（执行版）与 `session-create-v8-record.md`（评审记录，执行者不要读）。
 
 背景结论已经实测钉死（见 `spike-findings.md`）：
 
@@ -41,12 +41,15 @@ scripts/link-plugins.mjs       把仓库里的插件接到 profile 上（幂等�
 - 新会话对侧栏可见、可输入、插件重载后仍存活；
 - 建工作区走 `workspaceController.create({ path })`（幂等）。
 
-**评审进度**：v1→v7 共 6 轮，每轮两路线 + 一个全扫 agent。Round 7 只收到两路：
+**评审进度**：v1→v8 共 7 轮，每轮两路线 + 一个全扫 agent。Round 7 三路齐全：
 
 - Goal 路线：v7 清（注册证明、会话计数、无悬挂引用都对）。
-- Adversarial 路线：`subagents.rootOf` 的语义核实为正确，但**它会在两种情况下抛异常**（`'agent has no active runtime owner'`、`'subagent tree access requires the exact live caller'`），所以 Step 2.2 第 2 条要把调用包进 `try { … } catch { throw new Error('subagents cannot create sessions') }`。**这条还没落进方案**。
+- Adversarial 路线：`subagents.rootOf` 语义核实正确（普通调用者返回自身、子代理返回 `activation.root`），但**会在两种情况下抛 `SubagentError`**，所以要把调用包进 `try/catch`。
+- 全扫（迟到的那一路）：**2 high / 4 medium / 1 low** —— 验收没写「必须由顶层会话执行」、`rootOf` 抛错没有失败臂、`promptState` 从未声明、A3 前置引用了执行者看不到的内部步骤号、A6 只比较已知工作区（新建一个工作区就能绕过）、A4 的「不是目录」夹具依赖库里一个可能移动的文件。
 
-**Round 7 的第三路（全扫）结论没收到**——agent 还在跑时这台机器就收工了，所以 v7 的评审是**不完整**的，不要当作已通过。
+上面这些已全部落进 **v8**。
+
+**v8 还没有被评审过** —— 这是交接时最要紧的一条，别当作已通过。下一步：给 v8 派一轮全扫（新 agent，不看历史），无 high/medium 再开始实现。
 
 ## 三、下一个人在另一台机器上怎么接
 
