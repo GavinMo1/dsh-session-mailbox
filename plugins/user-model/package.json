@@ -1,6 +1,6 @@
 {
   "name": "dsh-user-model",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
@@ -10,7 +10,9 @@
     ".": "./index.js",
     "./um": "./lib/um.mjs",
     "./store": "./lib/store.mjs",
+    "./server": "./lib/server.mjs",
     "./paths": "./lib/paths.mjs",
+    "./page.html": "./lib/page.html",
     "./package.json": "./package.json"
   },
   "dsh": {

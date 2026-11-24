@@ -8,10 +8,15 @@ import * as um from './um.mjs'
 
 const ENTRIES = 'entries'
 const PENDING = '.pending'
+const RETIRED = '.retired'
 const ID_RE = /^\d{8}-[a-z][a-z0-9-]{0,40}$/
 
 const entriesDir = (root) => path.join(root, ENTRIES)
 const pendingDir = (root) => path.join(root, ENTRIES, PENDING)
+const retiredDir = (root) => path.join(root, ENTRIES, RETIRED)
+
+// The two sub-directories of entries/ that are states rather than entries.
+const SUBDIRS = [PENDING, RETIRED]
 
 const exists = (p) => {
   try {
@@ -76,6 +81,53 @@ function readEntry(full, name, opts = {}) {
   return { ok: true, entry: parsed.entry }
 }
 
+// One directory of entries, newest date first.
+// opts.pending is forwarded to the validators: an entry under .pending/ is
+// allowed to have empty approval fields, one under entries/ or .retired/ is not.
+function scanEntries(dir, opts = {}) {
+  const listing = exists(dir) ? readdirSafe(dir) : []
+  if (listing === null) return { ok: false, error: 'unreadable: ' + path.basename(dir) }
+  const entries = []
+  const skipped = []
+  for (const name of listing) {
+    const full = path.join(dir, name)
+    let isDir = false
+    try {
+      isDir = fs.statSync(full).isDirectory()
+    } catch {
+      skipped.push(name)
+      continue
+    }
+    if (isDir) {
+      // .pending/ and .retired/ are states, not entries; anything else is stray.
+      if (!SUBDIRS.includes(name)) skipped.push(name)
+      continue
+    }
+    if (name.endsWith('.tmp')) continue
+    if (!name.endsWith('.md')) {
+      skipped.push(name)
+      continue
+    }
+    const read = readEntry(full, name, opts)
+    if (read.ok !== true) {
+      skipped.push(name)
+      continue
+    }
+    entries.push(read.entry)
+  }
+  entries.sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
+  return { ok: true, entries, skipped }
+}
+
+// A library that has been cloned but never written to has no entries/ directory
+// at all: git does not track empty directories. Keying the verdict off entries/
+// therefore reported such a library as "missing", which the agents are told to
+// read as "not synced on this machine" — a broken library and an empty one must
+// not be the same answer. The root is what distinguishes them.
+function libraryVerdict(root) {
+  return exists(root) ? 'ok' : 'missing'
+}
+
 // Write `text` to `dir/base` without ever overwriting an existing target.
 // fs.rename is forbidden here: it silently replaces the destination.
 export function land(dir, base, text, onSuccess) {
@@ -108,6 +160,26 @@ export function land(dir, base, text, onSuccess) {
   }
 }
 
+// The one place rename is legitimate: the destination is a file that was just
+// read and re-validated, so replacing it is the intent, and rename is what makes
+// the replacement atomic instead of truncate-then-write.
+function replaceText(target, text) {
+  const tmp = target + '.' + process.pid + '-' + Math.random().toString(16).slice(2) + '.tmp'
+  try {
+    fs.writeFileSync(tmp, text, { encoding: 'utf8', flag: 'wx' })
+  } catch (e) {
+    tryUnlink(tmp)
+    return { ok: false, error: 'error: cannot write entry: ' + ((e && e.code) || 'unknown') }
+  }
+  try {
+    fs.renameSync(tmp, target)
+    return { ok: true }
+  } catch (e) {
+    tryUnlink(tmp)
+    return { ok: false, error: 'error: cannot write entry: ' + ((e && e.code) || 'unknown') }
+  }
+}
+
 function git(root, args) {
   try {
     const out = execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -124,12 +196,26 @@ function git(root, args) {
   }
 }
 
-function commitOne(root, id) {
-  const rel = ENTRIES + '/' + id + '.md'
-  const add = git(root, ['add', '--', rel])
-  if (add.ok !== true) return add
-  return git(root, ['commit', '-m', 'entry: ' + id, '--', rel])
+// Stage and commit exactly the paths given, then push. `--` keeps a path that
+// looks like a revision from being read as one; a path that was deleted is
+// staged as a deletion, which is why the caller must pass the old name too.
+function commitPaths(root, rels, message) {
+  const add = git(root, ['add', '--', ...rels])
+  if (add.ok !== true) return { ok: false, error: 'error: commit failed: ' + add.reason }
+  const commit = git(root, ['commit', '-m', message, '--', ...rels])
+  if (commit.ok !== true) return { ok: false, error: 'error: commit failed: ' + commit.reason }
+  return { ok: true }
 }
+
+function commitAndPush(root, rels, message) {
+  const committed = commitPaths(root, rels, message)
+  if (committed.ok !== true) return committed
+  const pushed = git(root, ['push'])
+  if (pushed.ok !== true) return { ok: false, error: 'error: push failed: ' + pushed.reason }
+  return { ok: true }
+}
+
+const relOf = (id, dir) => (dir === undefined ? ENTRIES + '/' + id + '.md' : ENTRIES + '/' + dir + '/' + id + '.md')
 
 // ---- search -------------------------------------------------------------
 
@@ -137,40 +223,11 @@ export function search(root, keywords) {
   const tokens = um.tokenize(keywords.join(' '))
   if (tokens.length === 0) return { ok: false, error: 'error: no keywords' }
 
-  const dir = entriesDir(root)
-  const listing = exists(dir) ? readdirSafe(dir) : null
-  const library = listing === null ? 'missing' : 'ok'
+  const scanned = scanEntries(entriesDir(root))
+  const library = libraryVerdict(root)
   const staged = stagedIds(root).length
-  const skipped = []
-  const entries = []
-
-  if (listing !== null) {
-    for (const name of listing) {
-      const full = path.join(dir, name)
-      let isDir = false
-      try {
-        isDir = fs.statSync(full).isDirectory()
-      } catch {
-        skipped.push(name)
-        continue
-      }
-      if (isDir) {
-        if (name !== PENDING) skipped.push(name)
-        continue
-      }
-      if (name.endsWith('.tmp')) continue
-      if (!name.endsWith('.md')) {
-        skipped.push(name)
-        continue
-      }
-      const read = readEntry(full, name)
-      if (read.ok !== true) {
-        skipped.push(name)
-        continue
-      }
-      entries.push(read.entry)
-    }
-  }
+  const skipped = scanned.ok === true ? scanned.skipped.slice() : [ENTRIES]
+  const entries = scanned.ok === true ? scanned.entries : []
 
   const ranked = um.rank(entries, tokens)
   const rows = ranked.slice(0, um.MAX_RESULTS).map((row) => row.entry)
@@ -178,6 +235,44 @@ export function search(root, keywords) {
     ok: true,
     lines: um.formatSearch({ root, library, staged, rows, total: ranked.length, skipped }),
   }
+}
+
+// ---- list / show --------------------------------------------------------
+
+// Everything in the library, by state. Used by `um list` and by the page; the
+// agent never sees this, which is why it is not a fourth tool.
+export function listAll(root) {
+  const approved = scanEntries(entriesDir(root))
+  const pending = scanEntries(pendingDir(root), { pending: true })
+  const retired = scanEntries(retiredDir(root))
+  const skipped = []
+  for (const part of [approved, pending, retired]) {
+    if (part.ok !== true) skipped.push(part.error.replace(/^unreadable: /, '') + '/')
+    else skipped.push(...part.skipped)
+  }
+  return {
+    ok: true,
+    library: libraryVerdict(root),
+    root,
+    approved: approved.ok === true ? approved.entries : [],
+    staged: pending.ok === true ? pending.entries : [],
+    retired: retired.ok === true ? retired.entries : [],
+    skipped,
+  }
+}
+
+export function show(root, id) {
+  const key = String(id ?? '')
+  if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown entry: ' + key }
+  const places = [[entriesDir(root), {}], [pendingDir(root), { pending: true }], [retiredDir(root), {}]]
+  for (const [dir, opts] of places) {
+    const full = path.join(dir, key + '.md')
+    if (!exists(full)) continue
+    const read = readEntry(full, key + '.md', opts)
+    if (read.ok !== true) return { ok: false, error: 'error: bad entry: ' + (read.detail ?? read.error) }
+    return { ok: true, entry: read.entry }
+  }
+  return { ok: false, error: 'error: unknown entry: ' + key }
 }
 
 // ---- append -------------------------------------------------------------
@@ -287,11 +382,125 @@ export function approve(root, id, approvedBy) {
 
   // The entry is on disk and readable at this point. A git failure must not
   // undo that: it is reported, and `sync` retries the commit later.
-  const committed = commitOne(root, key)
-  if (committed.ok !== true) return { ok: false, error: 'error: commit failed: ' + committed.reason }
-  const pushed = git(root, ['push'])
-  if (pushed.ok !== true) return { ok: false, error: 'error: push failed: ' + pushed.reason }
+  const committed = commitAndPush(root, [relOf(key)], 'entry: ' + key)
+  if (committed.ok !== true) return committed
   return { ok: true, id: key, lines: ['approved: ' + key] }
+}
+
+// ---- edit ---------------------------------------------------------------
+
+// Rewrites title and body of an existing entry, leaving its front matter — and
+// so its date, kind and approval — untouched. The old text is never lost: it is
+// in the previous commit, which is why `history` exists.
+export function edit(root, id, opts = {}) {
+  const key = String(id ?? '')
+  if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown entry: ' + key }
+  const full = path.join(entriesDir(root), key + '.md')
+  if (!exists(full)) return { ok: false, error: 'error: unknown entry: ' + key }
+
+  const current = readEntry(full, key + '.md')
+  if (current.ok !== true) return { ok: false, error: 'error: bad entry: ' + (current.detail ?? current.error) }
+
+  const title = opts.title === undefined ? current.entry.title : String(opts.title)
+  const body = opts.body === undefined
+    ? current.entry.body
+    : um.normalizeNewlines(opts.body).replace(/\n+$/, '')
+  if (title === current.entry.title && body === current.entry.body) {
+    return { ok: true, id: key, lines: ['unchanged: ' + key] }
+  }
+  const titleVerdict = um.validateTitle(title)
+  if (titleVerdict.ok !== true) return { ok: false, error: 'error: bad title: ' + titleVerdict.detail }
+  const bodyVerdict = um.validateBody(body)
+  if (bodyVerdict.ok !== true) return { ok: false, error: 'error: bad body: ' + bodyVerdict.detail }
+
+  const next = { ...current.entry, title, body }
+  const rewritten = replaceText(full, um.renderEntry(next))
+  if (rewritten.ok !== true) return rewritten
+  // Re-read: an entry that no longer parses is worse than an old one.
+  const after = readEntry(full, key + '.md')
+  if (after.ok !== true) return { ok: false, error: 'error: bad entry after write: ' + (after.detail ?? after.error) }
+
+  const changed = []
+  if (title !== current.entry.title) changed.push('title')
+  if (body !== current.entry.body) changed.push('body')
+  const committed = commitAndPush(root, [relOf(key)], 'edit: ' + key + ' (' + changed.join(', ') + ')')
+  if (committed.ok !== true) return committed
+  return { ok: true, id: key, lines: ['edited: ' + key] }
+}
+
+// ---- retire / restore ---------------------------------------------------
+
+const reasonOf = (reason) => {
+  const r = um.normalizeNewlines(reason ?? '').replace(/\s+/g, ' ').trim()
+  return r === '' ? '' : ' — ' + r.slice(0, 120)
+}
+
+// Deleting an entry means moving it out of the set `search` reads. It is not a
+// hard delete: the file stays in the repository, so the decision to drop it is
+// itself part of the history, and `restore` can undo the mistake.
+export function retire(root, id, reason) {
+  const key = String(id ?? '')
+  if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown entry: ' + key }
+  const from = path.join(entriesDir(root), key + '.md')
+  if (!exists(from)) {
+    if (exists(path.join(retiredDir(root), key + '.md'))) {
+      return { ok: false, error: 'error: already retired: ' + key }
+    }
+    return { ok: false, error: 'error: unknown entry: ' + key }
+  }
+  fs.mkdirSync(retiredDir(root), { recursive: true })
+  const to = path.join(retiredDir(root), key + '.md')
+  if (exists(to)) return { ok: false, error: 'error: entry exists: ' + key }
+
+  try {
+    fs.renameSync(from, to)
+  } catch (e) {
+    return { ok: false, error: 'error: cannot retire: ' + ((e && e.code) || 'unknown') }
+  }
+  const committed = commitAndPush(root, [relOf(key), relOf(key, RETIRED)], 'retire: ' + key + reasonOf(reason))
+  if (committed.ok !== true) return committed
+  return { ok: true, id: key, lines: ['retired: ' + key] }
+}
+
+export function restore(root, id) {
+  const key = String(id ?? '')
+  if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown entry: ' + key }
+  const from = path.join(retiredDir(root), key + '.md')
+  if (!exists(from)) return { ok: false, error: 'error: unknown retired: ' + key }
+  fs.mkdirSync(entriesDir(root), { recursive: true })
+  const to = path.join(entriesDir(root), key + '.md')
+  if (exists(to)) return { ok: false, error: 'error: entry exists: ' + key }
+
+  try {
+    fs.renameSync(from, to)
+  } catch (e) {
+    return { ok: false, error: 'error: cannot restore: ' + ((e && e.code) || 'unknown') }
+  }
+  const committed = commitAndPush(root, [relOf(key), relOf(key, RETIRED)], 'restore: ' + key)
+  if (committed.ok !== true) return committed
+  return { ok: true, id: key, lines: ['restored: ' + key] }
+}
+
+// ---- history ------------------------------------------------------------
+
+export function history(root, id) {
+  const key = String(id ?? '')
+  if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown entry: ' + key }
+  const rels = [relOf(key), relOf(key, PENDING), relOf(key, RETIRED)]
+  const log = git(root, ['log', '--date=short', '--pretty=format:%h %ad %s', '--', ...rels])
+  if (log.ok !== true) return { ok: false, error: 'error: git log failed: ' + log.reason }
+  const lines = log.out.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+  return { ok: true, id: key, lines: lines.length === 0 ? ['(no commits)'] : lines }
+}
+
+// ---- dirty --------------------------------------------------------------
+
+// How many paths `sync` would still have to commit. The page shows it because a
+// failed push leaves the entry readable while the repository quietly diverges.
+export function dirtyCount(root) {
+  const status = git(root, ['status', '--porcelain'])
+  if (status.ok !== true) return 0
+  return status.out.split('\n').filter((line) => line.trim() !== '').length
 }
 
 // ---- sync ---------------------------------------------------------------
@@ -299,22 +508,29 @@ export function approve(root, id, approvedBy) {
 export function sync(root) {
   const status = git(root, ['status', '--porcelain'])
   if (status.ok !== true) return { ok: false, error: 'error: commit failed: ' + status.reason }
-  const paths = status.out
-    .split('\n')
-    .map((line) => line.replace(/\s+$/, ''))
-    .filter((line) => line !== '')
-    .map((line) => {
-      const rest = line.slice(3)
-      const arrow = rest.indexOf(' -> ')
-      return arrow === -1 ? rest : rest.slice(arrow + 4)
-    })
-    .filter((p) => p.startsWith(ENTRIES + '/') && p.endsWith('.md'))
+
+  // Group the changed paths by entry id instead of assuming one path per id:
+  // a retire shows up as a deletion plus an addition, and passing only the old
+  // name would make `git add` fail on a pathspec that no longer exists.
+  const groups = new Map()
+  for (const line of status.out.split('\n')) {
+    const trimmed = line.replace(/\s+$/, '')
+    if (trimmed === '') continue
+    const rest = trimmed.slice(3)
+    const arrow = rest.indexOf(' -> ')
+    const rel = arrow === -1 ? rest : rest.slice(arrow + 4)
+    if (!rel.startsWith(ENTRIES + '/') || !rel.endsWith('.md')) continue
+    const id = path.basename(rel, '.md')
+    if (!groups.has(id)) groups.set(id, [])
+    groups.get(id).push(rel)
+  }
 
   let committed = 0
-  for (const rel of paths) {
-    const id = path.basename(rel, '.md')
-    const result = commitOne(root, id)
-    if (result.ok !== true) return { ok: false, error: 'error: commit failed: ' + result.reason }
+  for (const [id, rels] of groups) {
+    // Commit only here; the push happens once, below, so a mid-run push failure
+    // cannot leave half the entries committed and reported as uncommitted.
+    const result = commitPaths(root, rels, 'entry: ' + id)
+    if (result.ok !== true) return result
     committed++
   }
   // Push even when nothing was committed: a previous `approve` may have
@@ -345,7 +561,7 @@ export function check(root) {
         continue
       }
       if (isDir) {
-        if (!(pending === false && name === PENDING)) lines.push('stray file: ' + name)
+        if (!SUBDIRS.includes(name)) lines.push('stray file: ' + name)
         continue
       }
       if (name.endsWith('.tmp')) {
@@ -364,23 +580,25 @@ export function check(root) {
   }
   if (exists(entriesDir(root))) scan(entriesDir(root), false)
   if (exists(pendingDir(root))) scan(pendingDir(root), true)
+  if (exists(retiredDir(root))) scan(retiredDir(root), false)
   return { ok: lines.length === 0, lines }
 }
 
 // ---- status -------------------------------------------------------------
 
 export function status(root) {
-  const listing = exists(entriesDir(root)) ? readdirSafe(entriesDir(root)) : null
-  const library = listing === null ? 'missing' : 'ok'
-  const approved = listing === null ? 0 : listing.filter((name) => name.endsWith('.md')).length
+  const scanned = scanEntries(entriesDir(root))
+  const approved = scanned.ok === true ? scanned.entries.length : 0
+  const retired = scanEntries(retiredDir(root))
   const staged = stagedIds(root)
   return {
     ok: true,
     lines: [
-      'library: ' + library,
+      'library: ' + libraryVerdict(root),
       'root: ' + root,
       'entries: ' + approved,
       'staged: ' + staged.length,
+      'retired: ' + (retired.ok === true ? retired.entries.length : 0),
       ...staged.map((id) => 'staged id: ' + id),
     ],
   }
