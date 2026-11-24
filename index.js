@@ -148,7 +148,14 @@ export function apply(ctx, config = {}) {
           primitive: { type: 'string', required: true, enum: ['followup', 'steer'] },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: `message queued to session ${value.name} (${value.to})` }],
+      // statusBefore and primitive are computed anyway; surface them, because
+      // `steer` (the target was running, so the message lands in its current
+      // step) and `followup` (it starts a new turn) behave very differently and
+      // the caller cannot otherwise tell which one happened.
+      render: (_args, value) => [{
+        type: 'text',
+        text: `message queued to session ${value.name} (${value.to}) via ${value.primitive}; the target was ${value.statusBefore} before the call`,
+      }],
     },
     async execute(args, exec) {
       if (exec.agent === undefined) throw new Error('send_session_message requires a calling agent')
