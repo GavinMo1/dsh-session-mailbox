@@ -8,6 +8,8 @@
 |---|---|
 | `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；子代理内部调用返回空数组。 |
 | `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`。 |
+| `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
+| `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
 
 `agent` 接受四种写法，按顺序匹配：**完整标题** → `name` → 完整 `id` → id 后缀 → 标题子串。任一步命中多个就报 `ambiguous` 并列出候选，不猜。
 
@@ -16,6 +18,14 @@
 空闲目标 → `followup`（开新 turn）；运行中的目标 → `steer`（下一个 step）。
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
+
+## create_session 的语义
+
+- **建在哪**：给 `path` 就交给 `workspaceRegistry.create(path)`——它按 `fs.realpath` 规范化、同一 canonical 路径幂等复用，所以「已存在就复用、不存在就登记」由它保证，代码里不做路径字符串比较。不给 `path` 就落到**调用者自己的**工作区（先按「本会话是否已在某工作区的 `sessionIds` 里」判定，再退回 cwd 相等）。
+- **`[created]` / `[reused]`**：只由「调用前后的工作区 id 差集」决定，不看 `create()` 的返回值形状。
+- **首条消息**：给了非空白 `prompt` 就走 `sessionController.prompt(..., mode: 'queue')` 真发一轮，**会真的消耗一次模型调用并跑工具**；空白视为没给，不发请求。
+- **硬闸**：建完立刻回读该工作区的 `sessionIds`，证明会话此刻确实在里面，否则报 `session not accounted`。
+- **不建目录、不删任何东西**：路径非法只报错。
 
 ## 配置
 
@@ -57,3 +67,10 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 - 目标 turn 被取消或归档时消息可能丢失：用户按 Stop 保留；运行中被归档会被销毁；空闲归档则保留但被 gate 拦住。
 - **不承诺「不能借权限」可被强制**：消息里没有任何可表达权限的字段，但对端在自己的权限下执行对端的请求，
   这是提示词层面的约束，不是机制拦截。
+- **`create_session` 建的会话不会被自动清理**：误建只能由用户在 GUI 里删，插件不提供删除。
+- **`create_session` 子代理不可用**：header 自报子代理、或 `subagents.rootOf` 指向别的 agent 时一律拒绝。
+  该服务取不到时也是拒绝（报 `cannot verify ...`），不是放行。
+- **`create_session` 不声明并发安全**：两个并发调用共用同一份「调用前 id 快照」，后一个可能把已有工作区
+  报成 `[created]`。方向无害。
+- **别名拼写的 path 可能与输入不同**：返回的 `workspacePath` 是 `fs.realpath` 后的规范值，比较一律先规范化。
+
