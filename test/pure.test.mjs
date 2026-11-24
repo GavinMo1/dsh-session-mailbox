@@ -9,6 +9,8 @@ import {
   resolveTarget,
   messageText,
   messageSource,
+  messageSummary,
+  CONTEXT_SUMMARY_MAX_CHARS,
 } from '../lib/pure.js'
 
 // 44 characters, last 8 all distinct
@@ -123,11 +125,34 @@ test('allow', () => {
 test('text-source', () => {
   console.log('CASE text-source')
   assert.strictEqual(messageText('aaaa1111', 'ping'), 'Agent aaaa1111 sent a message:\nping')
-  const src = messageSource('s-1')
-  assert.deepStrictEqual(Object.keys(src), ['kind', 'form', 'senderSessionId'])
+  const src = messageSource('s-1', 'aaaa1111', 'ping')
+  assert.deepStrictEqual(Object.keys(src), ['kind', 'form', 'summary', 'senderSessionId'])
   assert.strictEqual(src.kind, 'session-mailbox')
-  assert.strictEqual(src.form, 'relay')
+  // `notice`, not `relay`: only the notice form lets the collapsed Chat row
+  // carry a summary, and that summary is what makes the message readable
+  // without expanding it.
+  assert.strictEqual(src.form, 'notice')
+  assert.strictEqual(src.summary, 'aaaa1111: ping')
+  // kept for consumers that resolve the sender themselves
   assert.strictEqual(src.senderSessionId, 's-1')
+})
+
+test('summary-bound', () => {
+  console.log('CASE summary-bound')
+  assert.strictEqual(CONTEXT_SUMMARY_MAX_CHARS, 120)
+  // a multi-line message collapses to one line: the row is one line tall, and a
+  // raw newline would hide everything after it
+  assert.strictEqual(messageSummary('me', 'first\nsecond\tthird'), 'me: first second third')
+  // short text is untouched
+  assert.strictEqual(messageSummary('me', '  hi  '), 'me: hi')
+  // exactly at the bound: no ellipsis
+  const atBound = 'x'.repeat(CONTEXT_SUMMARY_MAX_CHARS - 'me: '.length)
+  assert.strictEqual(messageSummary('me', atBound).length, CONTEXT_SUMMARY_MAX_CHARS)
+  // one over the bound: sliced to bound - 1 and ellipsized, total still bounded
+  const overByOne = 'y'.repeat(CONTEXT_SUMMARY_MAX_CHARS - 'me: '.length + 1)
+  const bounded = messageSummary('me', overByOne)
+  assert.strictEqual(bounded.length, CONTEXT_SUMMARY_MAX_CHARS)
+  assert.ok(bounded.endsWith('…'))
 })
 
 test('resolve-title', () => {
