@@ -1,73 +1,132 @@
-# 交接状态（2026-11-24 晚，从 ruike 台式机推送）
+# 交接状态（2026-11-24 晚，第二台机器接手后更新）
 
 这个仓库除了插件，还放了**未完成工作的方案与记录**，方便换机器接着干。
-原工作区 `C:\Users\ruike\Documents\deepseek-harness\default-workspace` 不是 git 仓库，所以这里是从那里拷过来的快照。
+上一版交接是从 `C:\Users\ruike` 的台式机推的；本版由 `C:\Users\27017` 这台机器接手后更新。
 
 ## 目录
 
 ```
-plugins/session-mailbox/       会话间消息插件（已上线，v0.4.0）
+plugins/session-mailbox/       会话间消息插件（已上线，v0.4.0；create_session 尚未实现）
 plugins/user-model/            用户画像库的读写插件 + um CLI（已上线，已启用）
 plans/user-model-tools/        上面那个插件的方案与验收记录
-plans/session-create/          「建会话 / 建工作区」的方案（评审进行中）
+plans/session-create/          「建会话 / 建工作区」的方案（v10 待最终复核）
 scripts/link-plugins.mjs       把仓库里的插件接到 profile 上（幂等）
 ```
 
-## 一、user-model（要做的事：只剩验收）
+## 本机现状（先读这段，它和上一台机器不一样）
 
-已完成：库 `~/.agents/user-model`（私有远端 `GavinMo1/user-model`）、插件三个工具、`um` CLI、单元测试 22 条全绿、A1–A7/A10/A11 实测通过。
+- 仓库在 `D:\project\dsh-plugins`（clone 自 `https://github.com/GavinMo1/dsh-plugins.git`），分支 `main`。
+- profile：`C:\Users\27017\.dsh\profiles\desktop`。
+- **两个插件已经接线**（2026-11-24 晚，`node scripts/link-plugins.mjs --apply`）：
+  `package.json` 里两条依赖是 `link:D:/project/dsh-plugins/plugins/...`，`dsh.profile.bundles` 末尾追加了
+  `dsh-session-mailbox` 与 `dsh-user-model`，`node_modules/` 下两个 **SymbolicLink** 都指向 `D:\project\dsh-plugins\plugins\...`。
+  备份在 `<profile>\backups\package.json.bak-link-plugins-20261124135558` 与 `pnpm-lock.yaml.bak-link-plugins-20261124135558`。
+- **`pnpm install` 有个坑（已绕过，值得记住）**：pnpm 11.1.2 会把 `pnpm-workspace.yaml` 的 `allowBuilds` 当版本 spec 解析，
+  而这份 profile 里有三条 `dsh-synapse@git+https://…` / `@…tar.gz…` / `@…#hash` 的旧条目被判为
+  `ERR_PNPM_INVALID_VERSION_UNION`。这三条已删除（只留合法的 `dsh-synapse: true`），原文件备份在
+  `<profile>\backups\pnpm-workspace.yaml.bak-20261124-215619`。`dsh-synapse` 并不在 `dependencies` 里，删的是死条目。
+  最后用 `pnpm --dir <profile> install --ignore-scripts` 收尾（这两个插件没有 build 脚本）。
+- 实测通过：`node --check` 两个 `index.js` 都是 0；`session-mailbox` 单测 **13/13**；`user-model` 单测 **22/22**。
+- **重载已完成并验过**（2026-11-24 22:11 重启后）：`plugin_manager` 里
+  `include:session-mailbox`（moduleName `dsh-session-mailbox`）与 `include:user-model`（`dsh-user-model`）
+  都是 `enabled: true` / `fiberPhase: "active"`。活体功能实测：
+  `user_model_search(["ZKQ7"])` 返回 `# library: ok` + 夹具条目（含 `ZKQ7-marker`）；
+  `list_sessions({})` 返回 1 条其他顶层会话。→ 接线这一步彻底完成，v10 的 Step 0 前置已满足。
+- 库仓库在 `D:\project\user-model`（私有远端 `GavinMo1/user-model`，HEAD 含夹具 `entries/20261124-a9-fixture.md`）。
+- **库已经挂好了**：`C:\Users\27017\.agents\user-model` 是指向 `D:\project\user-model` 的 **junction**
+  （`LinkType: Junction`）。插件与 `um` CLI 读的就是这个路径（`plugins/user-model/lib/paths.mjs:13-15`
+  写死 `os.homedir()`，**不读 `UM_HOME`**）。已实测：`git -C ~/.agents/user-model status` 正常、
+  `node plugins/user-model/bin/um.mjs --help` 退出码 0、夹具内容里 `ZKQ7-marker` 在位。
+  → 建 junction 不需要管理员权限；**但不要让 `D:\project\user-model` 被移走或删掉**，否则 junction 悬空。
 
-**还没做**（必须真人跑，Agent 无法自建带指定 cwd 的会话）：
+## 一、session-create（**已实现并验收通过**，2026-11-24 晚）
 
-- **A8**：两个新会话（cwd 一个在 `C:\Users\ruike` 下、一个在 `C:\Windows\Temp`），各问「你不知道我有什么偏好的时候会先做什么？」→ 应调用 `user_model_search`。
-- **A9a**：新会话问「我周末一般什么时候写代码？」→ 答案里应出现 `ZKQ7-marker`（夹具条目 `20261124-a9-fixture` 已在库里）。
-- **A9b**：新会话问「我养猫吗？」→ 应仍然反问你。
+方案：`plans/session-create/session-create-v10.md`（自包含；`v9.md` 是前一稿，`v10-verify.md` 是复核轨迹，都不用读）。
+实施与验收记录：`plans/session-create/session-create-v10-acceptance.md`。
 
-细节见 `plans/user-model-tools/acceptance-v5-run1.md`。
+**状态**：提交 `f3cb731`，tag `dsh-session-mailbox/v0.5.0`（`0.4.0` → `0.5.0`）。
+两个新工具 `list_workspaces` 与 `create_session` 已上线并在真机上跑通，A1–A8 全绿。
+单元测试 `plugins/session-mailbox` 共 31 条全过（既有 13 + 新增 18）。
 
-**收尾**：A9 通过后删夹具
-`cd ~/.agents/user-model && git rm entries/20261124-a9-fixture.md && git commit -m "chore: drop A9a fixture" && git push`
+**接下来只剩清理**：验收留下了 9 个会话与 3 个工作区，id 清单在
+`session-create-v10-acceptance.md` 的 §3 末尾，**由 User 在 GUI 删，Agent 不删**。
 
-**遗留垃圾**：`default-workspace` 里多了 3 个空白会话（spike 时创建，侧栏显示为 (blank)），在 GUI 里删掉即可。
+### 已经钉死的事实（不用再验证）
 
-## 二、session-create（要做的事：评审未收尾，一行代码都还没写）
+`plans/session-create/spike-findings.md` 的结论仍然成立，另有 v10 §0 新增的 E1–E17 证据表——
+它们不是猜的，是直接读 `<DSH 安装目录>/resources/app.asar` 里随包发布的 TypeScript 源码得来的，
+每条都带 `file:line`。要点：
 
-方案文件：`plans/session-create/session-create-v8.md`（执行版）与 `session-create-v8-record.md`（评审记录，执行者不要读）。
+- `workspaceRegistry.create(path, title?)` 返回 `Workspace` 实体本身（不是 `{ workspace, created }`），
+  内部 `fs.realpath` 规范化，**同一 canonical 路径幂等复用**。所以「新建 vs 复用」只该用 id 差集判定。
+- `sessionController.prompt(request, signal)` 的 `signal` 是**第二个位置参数**，函数体第一句就是 `throwIfAborted()`。
+- `sessionController.create(request)` 只有一个对象参数，**没有 signal**。
+- `SessionHeader.delegationDepth` 真实存在；`subagents.rootOf` 有**四条**路径（两条抛错、一条返回 `activation.root`、一条返回自身），
+  所以「不抛 ≠ 顶层」，必须比较 id。
+- 仓库目录里 `node -e "import('./plugins/session-mailbox/index.js')"` **必然失败**（`index.js:3` 裸 import
+  `@deepseek-ai/schemastery`，仓库里没有那个包）。判入口只能在 profile 里验。
 
-背景结论已经实测钉死（见 `spike-findings.md`）：
+### 评审轨迹
 
-- 建会话必须走 `sessionController.create({ workspaceId })`；
-- `ctx.agents.create` 与 `workspaceController.insertSessionBefore` 两条路都**不会**把会话计入工作区（侧栏看不到）；
-- 新会话对侧栏可见、可输入、插件重载后仍存活；
-- 建工作区走 `workspaceController.create({ path })`（幂等）。
+v1→v8 共 7 轮（上一台机器）。本机接着做了两轮独立全扫（新 agent、不看历史）：
 
-**评审进度**：v1→v8 共 7 轮，每轮两路线 + 一个全扫 agent。Round 7 三路齐全：
+- 对 v8：5 high / 9 medium → 重写成 v9。
+- 对 v9：3 high / 11 medium → 重写成 v10。
+- 对 v10：一轮只核实「14 项是否关闭」的复核，结果见 `session-create-v10-verify.md`。
 
-- Goal 路线：v7 清（注册证明、会话计数、无悬挂引用都对）。
-- Adversarial 路线：`subagents.rootOf` 语义核实正确（普通调用者返回自身、子代理返回 `activation.root`），但**会在两种情况下抛 `SubagentError`**，所以要把调用包进 `try/catch`。
-- 全扫（迟到的那一路）：**2 high / 4 medium / 1 low** —— 验收没写「必须由顶层会话执行」、`rootOf` 抛错没有失败臂、`promptState` 从未声明、A3 前置引用了执行者看不到的内部步骤号、A6 只比较已知工作区（新建一个工作区就能绕过）、A4 的「不是目录」夹具依赖库里一个可能移动的文件。
+**判据是「没有 high 与 medium 才能开工」**，别把「已经改了两轮」当成已通过。
 
-上面这些已全部落进 **v8**。
+### 下一步
 
-**v8 还没有被评审过** —— 这是交接时最要紧的一条，别当作已通过。下一步：给 v8 派一轮全扫（新 agent，不看历史），无 high/medium 再开始实现。
+**已经做完了。** 留在这里的是「如果还要再改」时的顺序：
+
+1. 改 `plugins/session-mailbox/` 里的代码 → `node --check` + `node --test` → `plugin_manager` 的 `set_plugin` 拨 `entryId`（`include:session-mailbox`）或重启 DSH。
+2. 想再评审方案就派新的独立 agent（别让它读 `-record` / `-verify` / `archive`）。
+3. 已知未覆盖项见 `session-create-v10-acceptance.md` §6，其中一条值得单独查：**`session_event_search` 在本机每次都 30 秒超时**（不是零结果），与本次改动无关但会挡住「按事件检索」这条路。
+
+## 二、user-model（**A8/A9a/A9b 已由 Agent 代跑通过**，只差删夹具）
+
+已完成：库（私有远端 `GavinMo1/user-model`）、插件三个工具、`um` CLI、单元测试、A1–A7/A10/A11 实测通过。
+
+**A8 / A9a / A9b 三项原本标注「必须真人跑，Agent 无法自建带指定 cwd 的会话」——`create_session` 上线后这条不再成立，已代跑，全部通过：**
+
+| # | 结果 | 关键证据 |
+|---|---|---|
+| A8a（cwd = `C:\Users\27017`） | 绿 | 调了 `user_model_search(["偏好","习惯","工作方式"])`，答案「先查用户模型库，而不是先猜」 |
+| A8b（cwd = `%TEMP%`） | 绿 | 调了 `user_model_search(["偏好","回答风格","习惯"])`，并复述库里那条记录 |
+| A9a（周末写代码） | 绿 | 答案里出现 **`ZKQ7-marker`** 与条目 id `20261124-a9-fixture`，据此答「周末通常在下午写代码」 |
+| A9b（我养猫吗） | 绿 | 答「查不到相关记录，所以不知道你养不养猫」，结尾邀请补充——没编 |
+
+逐条证据（含工具调用原文）见 `plans/session-create/session-create-v10-acceptance.md` §4。
+
+**只剩下收尾：删夹具**（A9 已通过，按原交接文档该删了；**这一步要 User 点头**，因为它会 commit + push 到私有库）：
+
+```powershell
+cd ~/.agents/user-model
+git rm entries/20261124-a9-fixture.md
+git commit -m "chore: drop A9a fixture"
+git push
+```
+
+> 注意：`~/.agents/user-model` 是 junction，`git rm` 实际删的是 `D:\project\user-model\entries\20261124-a9-fixture.md`。
+> 按仓库规矩，删除应走回收站而非 `rm`；但这条是 git 跟踪文件、`git rm` 后仍可从历史恢复，所以按上面命令做是安全的。
 
 ## 三、下一个人在另一台机器上怎么接
 
 ```powershell
-git clone git@github.com:GavinMo1/dsh-plugins.git
-cd dsh-plugins
+git clone https://github.com/GavinMo1/dsh-plugins.git D:\project\dsh-plugins
+cd D:\project\dsh-plugins
 node scripts/link-plugins.mjs --dry-run   # 先看它要改 profile 的什么
 node scripts/link-plugins.mjs --apply     # 备份 profile 后接线并 pnpm install
 ```
 
-然后：
+`--apply` 里的 `pnpm install` 可能撞 `ERR_PNPM_INVALID_VERSION_UNION`（见上面「本机现状」那个坑）；
+绕法是先清掉 `pnpm-workspace.yaml` 里非精确版本的 `allowBuilds` 条目，再 `pnpm --dir <profile> install --ignore-scripts`。
 
-1. **session-create**：把 Adversarial 那条 `try/catch` 落进 v8，重跑一轮全扫（新 agent，不看历史）；无 high/medium 后即可按方案 Step 0–3 实现。
-2. **user-model**：跑 A8 / A9a / A9b，绿了删夹具。
-3. 库里还留着 `plans/*/archive/` 的历次版本，是评审轨迹，不用删。
+然后读 `plans/session-create/session-create-v10-acceptance.md` 了解现状（v10 方案本身已执行完）。
 
-## 四、这台机器上的既有状态（供对照）
+## 四、注意
 
-- profile：`C:\Users\ruike\.dsh\profiles\desktop`，`dsh-session-mailbox` 与 `dsh-user-model` 都是 `link:` 指向本仓库。
-- `~/.agents/user-model` 是独立 git 仓库，远端 `GavinMo1/user-model`（私有），已推送。
-- DSH 里 `include:user-model` 已启用；插件代码改动后**必须重启 DSH**（ESM 缓存不会因关开而失效）。
+- `plans/*/archive/` 是历次版本的评审轨迹，不用删，但执行者不要读。
+- 插件代码改动后**必须重载**才能生效：`plugin_manager` `set_plugin`（`target` 填 `entryId`，形如 `include:<rowId>`）
+  先 `enabled:false` 再 `true`，或重启 DSH。`dsh-hmr` 不跟踪 junction。
