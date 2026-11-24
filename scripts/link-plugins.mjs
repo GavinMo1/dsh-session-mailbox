@@ -127,7 +127,10 @@ writeFileSync(profileManifestPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
 console.log(`wrote ${profileManifestPath}`)
 
 console.log('\nrunning pnpm install...')
-const pnpm = spawnSync('pnpm', ['--dir', profileDir, 'install'], { stdio: 'inherit', shell: true })
+// Windows ships pnpm as a .CMD shim, which node refuses to spawn without a
+// shell (CVE-2024-27980). Pass one already-quoted command string instead of an
+// args array: array + shell would concatenate unescaped arguments (DEP0190).
+const pnpm = spawnSync(`pnpm --dir "${profileDir}" install`, { stdio: 'inherit', shell: true })
 if (pnpm.status !== 0) {
   console.error(`\npnpm install failed (exit ${pnpm.status}). Restore with:`)
   console.error(`  Copy-Item "${backupPath}" "${profileManifestPath}" -Force`)
