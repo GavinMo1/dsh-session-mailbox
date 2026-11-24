@@ -55,8 +55,14 @@ node --check plugins/<name>/index.js
 ## 宿主 API 要点（从 `app.asar` 里的随包源码核实过）
 
 `resources/app.asar` 里带着与运行时同源的 TypeScript 源码（`node_modules/@deepseek-ai/*/src`），
-所以宿主行为可以**读出来**而不是猜。逐条都带 `file:line`，动手前能自己复核。下面这些是已经踩过、
-且改插件时最常要用的：
+所以宿主行为可以**读出来**而不是猜。用 `scripts/asar.mjs` 取：
+
+```powershell
+node scripts/asar.mjs list "<...>/resources/app.asar" 'dsh-workspace/src/index\.ts'
+node scripts/asar.mjs cat  "<...>/resources/app.asar" 'node_modules/@deepseek-ai/dsh-workspace/src/index.ts'
+```
+
+下面这些是已经踩过、且改插件时最常要用的（每条都能在源码里按 `file:line` 复核）：
 
 | 服务 | 事实 |
 |---|---|
@@ -68,6 +74,13 @@ node --check plugins/<name>/index.js
 不要把上面任何一条「优化」成更省事的写法——`create()` 的返回值形状、`rootOf` 的返回值、`prompt` 的
 signal 位置，三处都试过写错且不会报错。
 
+**读会话日志时的一个坑**：`~/.dsh/sessions/<cwd 编码>/<session-id>/session.v4.jsonl.zstd` 是**多个 zstd 帧
+首尾相接**的，不是单个流。`zstdDecompressSync` 只解第一帧（那帧只有 `{"type":"session",...}` 一行），
+看起来像「日志是空的」。要按帧切分后逐帧解，才能读到 `user/message` / `assistant/message` / `tool/call` /
+`tool/result`。想看某个会话跑过哪些工具时，`~/.dsh/storages/session_projcache/sessions/<id>.json` 里的
+`record.rows.contextTimeline.val.toolTally` 更省事。
+
+## 已知的静默失败模式（踩过）
 
 | 症状 | 真因 |
 |---|---|
