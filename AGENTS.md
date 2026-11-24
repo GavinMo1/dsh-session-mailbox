@@ -74,11 +74,21 @@ node scripts/asar.mjs cat  "<...>/resources/app.asar" 'node_modules/@deepseek-ai
 不要把上面任何一条「优化」成更省事的写法——`create()` 的返回值形状、`rootOf` 的返回值、`prompt` 的
 signal 位置，三处都试过写错且不会报错。
 
+**想读会话做了什么**（而不是它说了什么），用 `scripts/session-log.mjs`：
+
+```powershell
+node scripts/session-log.mjs <sessionId>                 # 提示词 / 工具调用+参数 / 工具返回 / 回答
+node scripts/session-log.mjs <sessionId> --tools         # 只看工具调用与返回
+node scripts/session-log.mjs <sessionId> --source session-mailbox   # 只看某来源入站的消息
+```
+
+它是读盘上的 durable 转录，所以对**已归档、从未加载的冷会话**同样有效——这是验证「某会话到底跑没跑、
+调了哪个工具」最直接的手段，比在运行中的会话里追问可靠。
+
 **读会话日志时的一个坑**：`~/.dsh/sessions/<cwd 编码>/<session-id>/session.v4.jsonl.zstd` 是**多个 zstd 帧
 首尾相接**的，不是单个流。`zstdDecompressSync` 只解第一帧（那帧只有 `{"type":"session",...}` 一行），
-看起来像「日志是空的」。要按帧切分后逐帧解，才能读到 `user/message` / `assistant/message` / `tool/call` /
-`tool/result`。想看某个会话跑过哪些工具时，`~/.dsh/storages/session_projcache/sessions/<id>.json` 里的
-`record.rows.contextTimeline.val.toolTally` 更省事。
+看起来像「日志是空的」——脚本里已按帧切分。另外 `~/.dsh/storages/session_projcache/sessions/<id>.json` 的
+`record.rows.contextTimeline.val.toolTally` 能一眼看出某会话跑过哪些工具，不必解日志。
 
 ## 已知的静默失败模式（踩过）
 

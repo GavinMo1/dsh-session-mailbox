@@ -22,6 +22,8 @@ plugins/
     README.md
 scripts/
   link-plugins.mjs        # 把本仓库所有插件接到某个 profile 上（幂等）
+  asar.mjs                # 直接读 app.asar 里的随包源码（不落盘解压）
+  session-log.mjs         # 读某个会话的 durable 转录：提示词 / 工具调用 / 工具返回 / 回答
 ```
 
 ## 新机器接线
