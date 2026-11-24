@@ -21,6 +21,26 @@
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
 
+## 收到的那条消息在界面上长什么样
+
+不是用户气泡。Chat 端的分类是 `message.ts` 里一句 `if (event.data.source.kind !== 'user')` —— **只要 source 不是
+`user`，这条 `user/message` 就变成 `kind: 'context'` 节点**，渲染成一行折叠的
+「上下文注入 · `session-mailbox` · 摘要」，点开才看全文。
+
+所以本插件刻意把 source 设成 `form: 'notice'` 并带 `summary`：
+
+| 字段 | 值 | 为什么 |
+|---|---|---|
+| `kind` | `'session-mailbox'` | 折叠行右侧的 producer 标签就用它 |
+| `form` | `'notice'` | **只有 `notice` 的摘要会显示在折叠行上**。`relay` 虽然语义更贴合（DSH 自己的 `AgentMessageSource` 用的就是 `relay`），但它的 `summary` 槽位在 Chat 里写死为 `null`，折叠状态只显示「上下文注入 · session-mailbox」，等于看不见 |
+| `summary` | `'<发送者>: <消息首行>'` | 压成单行、按 DSH 的 120 字符上限截断（对齐 `boundContextSummary`），折叠状态就能读到内容 |
+| `senderSessionId` | 发送者会话 id | 保留：`relay` 形态的 `RelayBody` 用它显示「来自会话 X」，将来若要换回 `relay` 不必重新收集 |
+
+发送者与正文都没丢：摘要里一份，「Agent \<name\> sent a message:」正文里又一份。
+
+**还有个更显眼的情形**：如果这条消息是**唤醒**一个空闲会话的，它会被投影成 `turn-trigger` 节点、走
+`TurnTriggerNodeView`——那是开启新 turn 的那种醒目行。插进正在跑的 turn 则是上面那种折叠行。
+
 ## create_session 的语义
 
 - **建在哪**：给 `path` 就交给 `workspaceRegistry.create(path)`——它按 `fs.realpath` 规范化、同一 canonical 路径幂等复用，所以「已存在就复用、不存在就登记」由它保证，代码里不做路径字符串比较。不给 `path` 就落到**调用者自己的**工作区（先按「本会话是否已在某工作区的 `sessionIds` 里」判定，再退回 cwd 相等）。
