@@ -1,0 +1,3 @@
+- insert:
+    - id: user-model
+      name: 'dsh-user-model'
