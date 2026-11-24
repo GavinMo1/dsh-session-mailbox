@@ -22,11 +22,15 @@ const exists = (p) => {
   }
 }
 
+// `null` means "there is something there but it cannot be listed"; an empty
+// array means an empty directory. Collapsing the two would let an unreadable
+// entries/ directory read as an empty library and silently answer "no match".
 const readdirSafe = (dir) => {
   try {
     return fs.readdirSync(dir).sort()
-  } catch {
-    return []
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return []
+    return null
   }
 }
 
@@ -53,7 +57,7 @@ export function isoNow(now = new Date()) {
 }
 
 export function stagedIds(root) {
-  return readdirSafe(pendingDir(root))
+  return (readdirSafe(pendingDir(root)) ?? [])
     .filter((name) => name.endsWith('.md'))
     .map((name) => name.slice(0, -3))
 }
@@ -74,7 +78,7 @@ function readEntry(full, name, opts = {}) {
 
 // Write `text` to `dir/base` without ever overwriting an existing target.
 // fs.rename is forbidden here: it silently replaces the destination.
-function land(dir, base, text, onSuccess) {
+export function land(dir, base, text, onSuccess) {
   const tmp = path.join(dir, base + '.' + process.pid + '-' + Math.random().toString(16).slice(2) + '.tmp')
   const target = path.join(dir, base)
   const entryName = base.replace(/\.md$/, '')
@@ -134,13 +138,14 @@ export function search(root, keywords) {
   if (tokens.length === 0) return { ok: false, error: 'error: no keywords' }
 
   const dir = entriesDir(root)
-  const library = exists(dir) ? 'ok' : 'missing'
+  const listing = exists(dir) ? readdirSafe(dir) : null
+  const library = listing === null ? 'missing' : 'ok'
   const staged = stagedIds(root).length
   const skipped = []
   const entries = []
 
-  if (library === 'ok') {
-    for (const name of readdirSafe(dir)) {
+  if (listing !== null) {
+    for (const name of listing) {
       const full = path.join(dir, name)
       let isDir = false
       try {
@@ -190,7 +195,14 @@ export function append(root, opts = {}) {
   if (bodyVerdict.ok !== true) return { ok: false, error: 'error: bad body: ' + bodyVerdict.detail }
 
   const day = opts.date === undefined ? localDate() : String(opts.date)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day + 'T00:00:00Z'))) {
+  // Date.parse accepts 2026-02-31 and rolls it forward, so compare the
+  // round trip instead of trusting the parse.
+  const rollover = new Date(day + 'T00:00:00Z')
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+    Number.isNaN(rollover.getTime()) ||
+    rollover.toISOString().slice(0, 10) !== day
+  ) {
     return { ok: false, error: 'error: bad date: ' + day }
   }
   if (day > tomorrow()) return { ok: false, error: 'error: bad date: ' + day }
@@ -203,7 +215,7 @@ export function append(root, opts = {}) {
   }
 
   // Only this id's leftovers: another id's tmp may belong to a live writer.
-  for (const name of readdirSafe(pendingDir(root))) {
+  for (const name of readdirSafe(pendingDir(root)) ?? []) {
     if (name.startsWith(id + '.md.') && name.endsWith('.tmp')) tryUnlink(path.join(pendingDir(root), name))
   }
 
@@ -241,6 +253,10 @@ function patchApproval(text, approvedBy, approvedOn) {
 export function approve(root, id, approvedBy) {
   const by = String(approvedBy ?? '').trim()
   if (by === '') return { ok: false, error: 'error: approved-by is required' }
+  // approved-by is written straight into a single front-matter line: a newline
+  // would split the front matter and leave an unparseable entry behind a
+  // success message.
+  if (/[\r\n]/.test(by)) return { ok: false, error: 'error: bad approved-by: contains a newline' }
   const key = String(id ?? '')
   if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown pending: ' + key }
 
@@ -261,6 +277,12 @@ export function approve(root, id, approvedBy) {
 
   const landed = land(entriesDir(root), key + '.md', patchApproval(text, by, isoNow()), () => ({ ok: true }))
   if (landed.ok !== true) return landed
+  // A landed entry that cannot be parsed would count as readable while being
+  // invisible to `search`; refuse to report success for it.
+  const reread = um.parseEntry(fs.readFileSync(target, 'utf8'), key + '.md')
+  if (reread.ok !== true) return { ok: false, error: 'error: bad pending: ' + reread.detail }
+  const reverdict = um.validateEntry(reread.entry, {})
+  if (reverdict.ok !== true) return { ok: false, error: 'error: bad pending: ' + reverdict.detail }
   tryUnlink(pendingPath)
 
   // The entry is on disk and readable at this point. A git failure must not
@@ -287,7 +309,6 @@ export function sync(root) {
       return arrow === -1 ? rest : rest.slice(arrow + 4)
     })
     .filter((p) => p.startsWith(ENTRIES + '/') && p.endsWith('.md'))
-  if (paths.length === 0) return { ok: true, lines: ['synced: 0'] }
 
   let committed = 0
   for (const rel of paths) {
@@ -296,6 +317,9 @@ export function sync(root) {
     if (result.ok !== true) return { ok: false, error: 'error: commit failed: ' + result.reason }
     committed++
   }
+  // Push even when nothing was committed: a previous `approve` may have
+  // committed successfully and then failed to push, which leaves a clean tree
+  // and an unpushed commit. That is exactly the case sync exists to repair.
   const pushed = git(root, ['push'])
   if (pushed.ok !== true) return { ok: false, error: 'error: push failed: ' + pushed.reason }
   return { ok: true, lines: ['synced: ' + committed] }
@@ -306,7 +330,12 @@ export function sync(root) {
 export function check(root) {
   const lines = []
   const scan = (dir, pending) => {
-    for (const name of readdirSafe(dir)) {
+    const listing = readdirSafe(dir)
+    if (listing === null) {
+      lines.push('unreadable: ' + path.basename(dir))
+      return
+    }
+    for (const name of listing) {
       const full = path.join(dir, name)
       let isDir = false
       try {
@@ -341,10 +370,9 @@ export function check(root) {
 // ---- status -------------------------------------------------------------
 
 export function status(root) {
-  const library = exists(entriesDir(root)) ? 'ok' : 'missing'
-  const approved = library === 'ok'
-    ? readdirSafe(entriesDir(root)).filter((name) => name.endsWith('.md')).length
-    : 0
+  const listing = exists(entriesDir(root)) ? readdirSafe(entriesDir(root)) : null
+  const library = listing === null ? 'missing' : 'ok'
+  const approved = listing === null ? 0 : listing.filter((name) => name.endsWith('.md')).length
   const staged = stagedIds(root)
   return {
     ok: true,

@@ -10,7 +10,7 @@ export const SLUG_RE = /^[a-z][a-z0-9-]{0,40}$/
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ISO_UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
-const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/
+const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u{20000}-\u{2FA1F}]/u
 const ASCII_WORD_RE = /[A-Za-z0-9#+._-]/
 
 export const length = (s) => Array.from(String(s ?? '')).length
@@ -26,7 +26,9 @@ export function normalizeNewlines(text) {
 //    adjacent bigram, so 深色 matches 偏好深色主题 without a dictionary.
 // 4. Duplicates are removed. An empty result means "no keywords", decided by callers.
 export function tokenize(query) {
-  const s = String(query ?? '')
+  // NFKC folds fullwidth forms (ａ, １) onto ASCII, so a fullwidth IME slip is
+  // still searchable; iteration is by code point, so Ext-B ideographs survive.
+  const chars = Array.from(String(query ?? '').normalize('NFKC'))
   const out = []
   const seen = new Set()
   const push = (t) => {
@@ -35,19 +37,19 @@ export function tokenize(query) {
     out.push(t)
   }
   let i = 0
-  while (i < s.length) {
-    const c = s[i]
+  while (i < chars.length) {
+    const c = chars[i]
     if (CJK_RE.test(c)) {
       let j = i
-      while (j < s.length && CJK_RE.test(s[j])) j++
-      const run = Array.from(s.slice(i, j))
+      while (j < chars.length && CJK_RE.test(chars[j])) j++
+      const run = chars.slice(i, j)
       if (run.length === 1) push(run[0])
       else for (let k = 0; k + 1 < run.length; k++) push(run[k] + run[k + 1])
       i = j
     } else if (ASCII_WORD_RE.test(c)) {
       let j = i
-      while (j < s.length && ASCII_WORD_RE.test(s[j])) j++
-      push(s.slice(i, j).toLowerCase())
+      while (j < chars.length && ASCII_WORD_RE.test(chars[j])) j++
+      push(chars.slice(i, j).join('').toLowerCase())
       i = j
     } else {
       i++

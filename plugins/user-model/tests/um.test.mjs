@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import * as um from '../lib/um.mjs'
+import * as store from '../lib/store.mjs'
 
 const sample = (over = {}) => ({
   schema: '1',
@@ -169,4 +170,50 @@ test('CASE slug-rule', () => {
   assert.equal(um.SLUG_RE.test('Bad_Slug'), false)
   assert.equal(um.SLUG_RE.test('1abc'), false)
   assert.equal(um.SLUG_RE.test('a'.repeat(42)), false)
+})
+
+test('CASE tokenize-fullwidth', () => {
+  assert.deepEqual(um.tokenize('ａｂｃ'), ['abc'])
+  assert.deepEqual(um.tokenize('深色 ＡＢＣ'), ['深色', 'abc'])
+})
+
+const mkroot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'um-store-'))
+
+test('CASE append-bad-calendar-date', () => {
+  const root = mkroot()
+  try {
+    const base = { slug: 'cal', kind: 'fact', title: 't', body: 'b' }
+    assert.equal(store.append(root, { ...base, date: '2026-02-31' }).error, 'error: bad date: 2026-02-31')
+    assert.equal(store.append(root, { ...base, date: '2026-13-01' }).error, 'error: bad date: 2026-13-01')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('CASE land-exclusive', () => {
+  const dir = mkroot()
+  try {
+    fs.writeFileSync(path.join(dir, 'x.md'), 'old')
+    const result = store.land(dir, 'x.md', 'new', () => ({ ok: true }))
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'error: entry exists: x')
+    assert.equal(fs.readFileSync(path.join(dir, 'x.md'), 'utf8'), 'old')
+    assert.deepEqual(fs.readdirSync(dir), ['x.md'])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('CASE approve-rejects-newline', () => {
+  const root = mkroot()
+  try {
+    const staged = store.append(root, { slug: 'nl', kind: 'fact', title: '标题', body: '正文', date: '2026-11-24' })
+    assert.equal(staged.ok, true)
+    const result = store.approve(root, staged.id, 'user\n2026-11-24')
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'error: bad approved-by: contains a newline')
+    assert.equal(store.stagedIds(root).length, 1)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
