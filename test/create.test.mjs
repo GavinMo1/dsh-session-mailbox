@@ -9,6 +9,7 @@ import {
   promptContent,
   subagentVerdict,
   gateVerdict,
+  deleteVerdict,
 } from '../lib/create.js'
 
 const ws = (id, path, sessionIds = []) => ({ id, path, title: id, sessionIds })
@@ -180,4 +181,29 @@ test('gate-verdict', () => {
   assert.strictEqual(gateVerdict({ before: ['s1'], now: ['s1'], sessionId: 's1' }), 'already-there')
   // id shapes disagreeing must still match
   assert.strictEqual(gateVerdict({ before: [], now: [7], sessionId: 7 }), 'ok')
+})
+
+test('delete-empty-workspace', () => {
+  console.log('CASE delete-empty-workspace')
+  assert.strictEqual(deleteVerdict({ sessionIds: [], callerId: 'me' }), 'ok')
+  assert.strictEqual(deleteVerdict({ sessionIds: undefined, callerId: 'me' }), 'ok')
+  // force is irrelevant when nothing is held
+  assert.strictEqual(deleteVerdict({ sessionIds: [], callerId: 'me', force: true }), 'ok')
+})
+
+test('delete-holds-sessions', () => {
+  console.log('CASE delete-holds-sessions')
+  // deleting a registration does not detach its sessions, so a non-empty
+  // workspace is refused by default
+  assert.strictEqual(deleteVerdict({ sessionIds: ['s1'], callerId: 'me' }), 'holds-sessions')
+  assert.strictEqual(deleteVerdict({ sessionIds: ['s1'], callerId: 'me', force: true }), 'ok')
+})
+
+test('delete-holds-caller', () => {
+  console.log('CASE delete-holds-caller')
+  // force must NOT override this one: it would hide the conversation in use
+  assert.strictEqual(deleteVerdict({ sessionIds: ['me'], callerId: 'me' }), 'holds-caller')
+  assert.strictEqual(deleteVerdict({ sessionIds: ['me'], callerId: 'me', force: true }), 'holds-caller')
+  // id shapes disagreeing must still match
+  assert.strictEqual(deleteVerdict({ sessionIds: [7], callerId: '7', force: true }), 'holds-caller')
 })

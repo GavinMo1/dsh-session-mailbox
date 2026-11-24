@@ -11,6 +11,7 @@
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档会话：离开侧栏与工作区分组，但**转录仍在磁盘上**，可用 `unarchiveSession`（或 GUI）恢复。逐 id 独立处理并报告 `{ archived, failed }`；已归档的 id 是 no-op。运行中的会话默认拒绝，除非 `stop: true`（先停它再归档）。**拒绝归档调用者自己**。 |
+| `delete_workspaces({ workspaceIds, force? })` | 按 id 删**工作区登记**：目录与所有会话日志都留在磁盘上，工作区离开侧栏。**不 detach**，所以工作区里的会话会丢侧栏分组——还持有会话时默认拒绝，要 `force: true`；持有调用者自己时**即使 force 也拒绝**。逐 id 独立，返回 `{ deleted, skipped, failed }`。 |
 
 `agent` 接受四种写法，按顺序匹配：**完整标题** → `name` → 完整 `id` → id 后缀 → 标题子串。任一步命中多个就报 `ambiguous` 并列出候选，不猜。
 
@@ -35,6 +36,15 @@
 - **不 detach**：归档只改 `archivedSessionIds`，不改工作区的 `sessionIds`，所以 `list_workspaces` 里的 `sessions: <n>` **仍然算上已归档的**。这是有意的：那个 n 是账目大小，不是可见会话数。
 - **运行中的会话**默认拒绝（`WorkspaceActiveSessionError`，错误文本会列出是什么活动挡着），`stop: true` 才会先停再归档。
 - **拒绝归档调用者自己**：那会把用户正在看的这个会话藏起来。
+
+## delete_workspaces 的语义
+
+- **删登记 ≠ 删目录、≠ 删会话**：走 `workspaceRegistry.delete(id)`，只把工作区那条记录从注册表与顺序里去掉。目录原样留在磁盘上，每个会话的日志目录也原样留着（实测：删完 `%TEMP%` 的工作区后，`C:\Users\27017\AppData\Local\Temp` 仍在，`session-e528255e-…` 的日志目录仍在）。
+- **但它会 orphan 会话**：`delete` **不 detach**，所以工作区里的会话仍然存在、仍然能被 `list_sessions` 列出，只是**失去了侧栏分组**。这是唯一不可通过本工具复原的副作用，所以有下面两道闸。
+- **闸一：还持有会话就拒绝**，除非 `force: true`。错误文本会列出有多少个、分别是哪些 id。
+- **闸二：持有调用者自己就拒绝，`force` 也不能越过**。理由同 `archive_sessions`：不能把用户正在看的东西藏起来。
+- **逐 id 独立**，返回 `{ deleted, skipped, failed }`。`skipped` 里区分两种情况：未知 id（注册表侧本来就是幂等 no-op）与撞上闸门（带原因）。
+- **不提供反方向**：删掉的登记无法用本工具重建。要重建就用 `create_session({ path })` 让 `workspaceRegistry.create` 重新登记那个目录——但**原工作区的 `sessionIds` 账目不会回来**，这是真损失。
 
 ## 配置
 
