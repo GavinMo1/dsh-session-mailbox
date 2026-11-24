@@ -44,12 +44,18 @@ scripts/link-plugins.mjs       把仓库里的插件接到 profile 上（幂等�
 方案：`plans/session-create/session-create-v10.md`（自包含；`v9.md` 是前一稿，`v10-verify.md` 是复核轨迹，都不用读）。
 实施与验收记录：`plans/session-create/session-create-v10-acceptance.md`。
 
-**状态**：提交 `f3cb731`，tag `dsh-session-mailbox/v0.5.0`（`0.4.0` → `0.5.0`）。
-两个新工具 `list_workspaces` 与 `create_session` 已上线并在真机上跑通，A1–A8 全绿。
-单元测试 `plugins/session-mailbox` 共 31 条全过（既有 13 + 新增 18）。
+**状态**：`session-mailbox` 已到 **v0.7.0**，四个提交依次是
+`f3cb731`（create_session + list_workspaces）、`731f715`（文档）、`c3abecd`（archive_sessions）、`9b01e4f`（delete_workspaces）。
+A1–A8 全绿；单元测试 `plugins/session-mailbox` 共 **34 条**全过（既有 13 + create 18 + delete 3）。
 
-**接下来只剩清理**：验收留下了 9 个会话与 3 个工作区，id 清单在
-`session-create-v10-acceptance.md` 的 §3 末尾，**由 User 在 GUI 删，Agent 不删**。
+**清理已经用新的工具做完了**（不再需要 User 手动删）：
+
+| 提交 / tag | 加了什么 | 为什么 |
+|---|---|---|
+| `c3abecd` / `v0.6.0` | `archive_sessions({ sessionIds, stop? })` | 归档＝离开侧栏但不删转录，宿主有 `unarchiveSession` 可恢复。验收留下的 12 个会话已用它归档 |
+| `9b01e4f` / `v0.7.0` | `delete_workspaces({ workspaceIds, force? })` | 删**工作区登记**。目录与会话日志都留盘上，但 `delete` **不 detach**，会话会丢侧栏分组——所以「还持有会话」默认拒绝（要 `force`），「持有调用者自己」即使 `force` 也拒绝 |
+
+`delete_workspaces` 已在真机上用一个临时工作区验过四条路径：持有会话被拒 → `force` 后删掉 → 删完 `%TEMP%` 目录仍在、被归档会话的日志目录仍在 → 未知 id 走 `skipped` 且不报错。
 
 ### 已经钉死的事实（不用再验证）
 
