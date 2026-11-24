@@ -21,25 +21,29 @@
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
 
-## 收到的那条消息在界面上长什么样
+## 收到的那条消息在界面上长什么样（以及为什么容易被忽略）
 
-不是用户气泡。Chat 端的分类是 `message.ts` 里一句 `if (event.data.source.kind !== 'user')` —— **只要 source 不是
-`user`，这条 `user/message` 就变成 `kind: 'context'` 节点**，渲染成一行折叠的
-「上下文注入 · `session-mailbox` · 摘要」，点开才看全文。
+不是用户气泡。Chat 端的分类在 `dsh-client-ui-chat` 的 `conversation-nodes/message.ts` 里只有一句判据：
+`if (event.data.source.kind !== 'user')` —— **只要 source 不是 `user`，这条 `user/message` 就变成 `kind: 'context'`
+节点**，渲染成一行折叠的「上下文注入 · `session-mailbox`」，点开才看到「来自会话 &lt;id&gt;」和正文。
 
-所以本插件刻意把 source 设成 `form: 'notice'` 并带 `summary`：
+这是 Chat 对所有非用户来源的统一处理，和本插件选了哪个 form 无关。**唯一的例外**是：如果这条消息是
+**唤醒**一个空闲会话的（而不是插进正在跑的 turn），它会被投影成 `turn-trigger` 节点、走 `TurnTriggerNodeView`，
+那是开启新 turn 的醒目行。
 
-| 字段 | 值 | 为什么 |
-|---|---|---|
-| `kind` | `'session-mailbox'` | 折叠行右侧的 producer 标签就用它 |
-| `form` | `'notice'` | **只有 `notice` 的摘要会显示在折叠行上**。`relay` 虽然语义更贴合（DSH 自己的 `AgentMessageSource` 用的就是 `relay`），但它的 `summary` 槽位在 Chat 里写死为 `null`，折叠状态只显示「上下文注入 · session-mailbox」，等于看不见 |
-| `summary` | `'<发送者>: <消息首行>'` | 压成单行、按 DSH 的 120 字符上限截断（对齐 `boundContextSummary`），折叠状态就能读到内容 |
-| `senderSessionId` | 发送者会话 id | 保留：`relay` 形态的 `RelayBody` 用它显示「来自会话 X」，将来若要换回 `relay` 不必重新收集 |
+### 不要为了「显眼」把 form 改成 `notice`
 
-发送者与正文都没丢：摘要里一份，「Agent \<name\> sent a message:」正文里又一份。
+`notice` 是唯一能让折叠行携带 `summary` 的表单（`relay` 的 summary 槽位在 `ContextBody` 里写死为 `null`），
+所以改过去确实能让折叠状态读到内容。2026-11-24 试过并**已回退**，原因：
 
-**还有个更显眼的情形**：如果这条消息是**唤醒**一个空闲会话的，它会被投影成 `turn-trigger` 节点、走
-`TurnTriggerNodeView`——那是开启新 turn 的那种醒目行。插进正在跑的 turn 则是上面那种折叠行。
+1. **语义错位**：DSH 的 `AgentMessageSource`（`dsh-subagent/src/continuation-messages.ts`）为「一个 agent 发给
+   另一个 agent 的消息」定义的正是 `relay`；而 `notice` 被明确注释为「runtime 陈述子 agent 结局」，
+   两者在源码里被刻意区分。
+2. **有功能损失**：`relay` 有专门的 `RelayBody` 显示「来自会话 X」，`notice` 没有。
+3. **治不了根**：折叠行的病根是「非 `user` 来源一律变 context 行」，换 form 只是让那一行多几个字。
+
+真要做出「像子 agent 回复那样醒目的卡片」，得写**客户端插件**去注册/覆盖 `conversation.chat.node` 的 `context` 键
+（`ctx.slots.inject('conversation.chat.node', …)`），代价是要新引 client bundle 与 web 构建，并接管所有上下文行的渲染。
 
 ## create_session 的语义
 

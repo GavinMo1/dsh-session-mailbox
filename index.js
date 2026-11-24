@@ -218,7 +218,7 @@ export function apply(ctx, config = {}) {
       const primitive = pure.primitiveFor(target.status)
       const message = createUserMessage({
         content: [{ type: 'text', text: pure.messageText(senderName, args.message) }],
-        source: pure.messageSource(exec.agent.id, senderName, args.message),
+        source: pure.messageSource(exec.agent.id),
       })
       if (primitive === 'followup') target.followup(message)
       else target.steer(message)
