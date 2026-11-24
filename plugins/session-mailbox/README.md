@@ -10,6 +10,7 @@
 | `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
+| `archive_sessions({ sessionIds, stop? })` | 按 id 归档会话：离开侧栏与工作区分组，但**转录仍在磁盘上**，可用 `unarchiveSession`（或 GUI）恢复。逐 id 独立处理并报告 `{ archived, failed }`；已归档的 id 是 no-op。运行中的会话默认拒绝，除非 `stop: true`（先停它再归档）。**拒绝归档调用者自己**。 |
 
 `agent` 接受四种写法，按顺序匹配：**完整标题** → `name` → 完整 `id` → id 后缀 → 标题子串。任一步命中多个就报 `ambiguous` 并列出候选，不猜。
 
@@ -26,6 +27,14 @@
 - **首条消息**：给了非空白 `prompt` 就走 `sessionController.prompt(..., mode: 'queue')` 真发一轮，**会真的消耗一次模型调用并跑工具**；空白视为没给，不发请求。
 - **硬闸**：建完立刻回读该工作区的 `sessionIds`，证明会话此刻确实在里面，否则报 `session not accounted`。
 - **不建目录、不删任何东西**：路径非法只报错。
+
+## archive_sessions 的语义
+
+- **归档 ≠ 删除**：走 `workspaceRegistry.archiveSession`，把 id 写进 `archivedSessionIds`。会话的转录、日志目录、工作区账目都不动——`list_sessions` 会因此不再列出它（收不到消息了），侧栏的分组也不再显示它。
+- **可逆**：宿主有 `workspaceController.unarchiveSession`，GUI 里也能恢复。**本插件只提供归档方向**，不提供删除，也不提供反归档（反归档是低频操作，留给 GUI/宿主）。
+- **不 detach**：归档只改 `archivedSessionIds`，不改工作区的 `sessionIds`，所以 `list_workspaces` 里的 `sessions: <n>` **仍然算上已归档的**。这是有意的：那个 n 是账目大小，不是可见会话数。
+- **运行中的会话**默认拒绝（`WorkspaceActiveSessionError`，错误文本会列出是什么活动挡着），`stop: true` 才会先停再归档。
+- **拒绝归档调用者自己**：那会把用户正在看的这个会话藏起来。
 
 ## 配置
 
