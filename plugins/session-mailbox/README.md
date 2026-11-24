@@ -7,7 +7,7 @@
 | 工具 | 作用 |
 |---|---|
 | `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；子代理内部调用返回空数组。 |
-| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`。 |
+| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档会话：离开侧栏与工作区分组，但**转录仍在磁盘上**，可用 `unarchiveSession`（或 GUI）恢复。逐 id 独立处理并报告 `{ archived, failed }`；已归档的 id 是 no-op。运行中的会话默认拒绝，除非 `stop: true`（先停它再归档）。**拒绝归档调用者自己**。 |
