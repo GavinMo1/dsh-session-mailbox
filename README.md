@@ -36,6 +36,14 @@ node scripts/link-plugins.mjs --apply       # 备份 profile 的 package.json，
 然后重启 DSH。`link:` 路径写的是本机绝对路径，所以每台机器各自跑一次这个脚本，`package.json`
 不进版本控制也不影响一致性。
 
+**`--apply` 里的 `pnpm install` 可能失败**，报 `ERR_PNPM_INVALID_VERSION_UNION`：pnpm 11 会把 profile 的
+`pnpm-workspace.yaml` 里 `allowBuilds` 的键当版本 spec 解析，凡是 `dsh-synapse@git+https://…` /
+`@…tar.gz…` / `@…#hash` 这种非精确写法都会让它整条命令 exit 1。这个文件是 profile 自己的历史遗留，
+与本仓库无关。处理：
+
+1. 只保留包的裸名（`dsh-synapse: true`），删掉带 `@` 的非精确条目；先备份那个 yaml。
+2. 再跑 `pnpm --dir <profile> install --ignore-scripts`。本仓库两个插件都没有 build 脚本，可以安全跳过。
+
 ## 升级
 
 ```powershell

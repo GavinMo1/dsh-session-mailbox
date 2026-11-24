@@ -37,6 +37,8 @@ node --test plugins/<name>/test/*.test.mjs   # 每个 CASE 都要有 console.log
 node --check plugins/<name>/index.js
 ```
 
+测试目录名不统一，按插件实际目录跑：`session-mailbox` 是 `test/`（单数），`user-model` 是 `tests/`（复数）。
+
 活体验证（不重启）：`plugin_manager` `set_plugin`，`target` 填 `entryId`
 （`include:<rowId>`，**不是**包名、**不是** `rowId`），`enabled:false` → `true`。
 两次都返回 `application:"applied"` 说明新代码已在跑。
@@ -50,7 +52,22 @@ node --check plugins/<name>/index.js
 - `package.json` 的 `version` 与 tag 保持一致；行为变更升 minor，修 bug 升 patch。
 - 交付前读一遍 `plugins/<name>/README.md`，把新行为、已知边界、卸载方式同步进去。
 
-## 已知的静默失败模式（踩过）
+## 宿主 API 要点（从 `app.asar` 里的随包源码核实过）
+
+`resources/app.asar` 里带着与运行时同源的 TypeScript 源码（`node_modules/@deepseek-ai/*/src`），
+所以宿主行为可以**读出来**而不是猜。逐条都带 `file:line`，动手前能自己复核。下面这些是已经踩过、
+且改插件时最常要用的：
+
+| 服务 | 事实 |
+|---|---|
+| `workspaceRegistry` | `list()` **同步**返回 `Workspace[]`；`create(path, title?)` 返回 `Workspace` **实体本身**（不是 `{ workspace, created }`），内部 `fs.realpath` 规范化、**同一 canonical 路径幂等复用**；`get(id)`；`delete(id)` 只删登记**不 detach 会话**（会话会丢侧栏分组）；`archiveSession(id, { stopActivity })` / `unarchiveSession` 改的是 `archivedSessionIds` |
+| `sessionController` | `create(request)` **只收一个对象参数、没有 signal**；`workspaceId` 与 `cwd` **只能给一个**；attach 失败的错误码是 `session/workspace-attach-failed`，`details.sessionId` 是真会话 id。`prompt(request, signal)` 的 `signal` 是**第二个位置参数**，函数体第一句就是 `signal.throwIfAborted()`；`requestId` **没有任何格式校验**，固定值即幂等 |
+| `subagents` | `rootOf(caller)` 有**四条**路径：调用者不是同一个 live 实例 → 抛；resident 且 root 仍 live → 返回 `activation.root`（**可能不是调用者**）；delegated 或 root 不 live → 抛；其余 → 返回调用者自身。所以「没抛 ≠ 顶层」，判定必须比较 id |
+| `SessionHeader` | 有 `delegationDepth` 字段（缺省按 0）；**没有**标题字段，标题在 `sessionTitle` 服务里 |
+
+不要把上面任何一条「优化」成更省事的写法——`create()` 的返回值形状、`rootOf` 的返回值、`prompt` 的
+signal 位置，三处都试过写错且不会报错。
+
 
 | 症状 | 真因 |
 |---|---|

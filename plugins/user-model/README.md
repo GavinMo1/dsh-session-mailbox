@@ -5,6 +5,9 @@ Host plugin: an agent consults a private library of durable user facts and decis
 Two parts, deliberately separated:
 
 - **data** — `~/.agents/user-model`, a private git repository (`GavinMo1/user-model`). One file per entry, no index, no cache.
+  The path is fixed: `pluginRoot()` resolves `os.homedir()` and never reads `UM_HOME`, so to keep the repository elsewhere
+  (another drive, say) the **only** supported move is to put it back at that path — a directory junction works and is what
+  this machine uses (`~/.agents/user-model` → `D:\project\user-model`). Do not repoint it by editing code.
 - **this plugin** — three tools plus one prompt block. It also ships `bin/um.mjs`, the `um` CLI, for the human.
 
 ## Tools
