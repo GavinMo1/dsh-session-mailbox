@@ -82,6 +82,8 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 - **标题不是稳定地址**：由 LLM 自动生成、会随新消息重新生成，也可能两个分支同名。所以标题只用于
   「用户说的是哪个」的解析，命中多个一律拒绝；要长期引用请用 `id`。
 - 投递不分 workspace；但验收用的 `session_event_search` 要求对端与调用者同 `cwd`。
+  （注：`session_event_search` 属于 `@deepseek-ai/dsh-tool-session-query`，用户关掉会话搜索后整个插件的
+  工具会消失，调用报 `unknown tool`。`list_sessions` 不依赖它。）
 - 维护期（compaction 等）的 `agent.status` 仍报 `idle`，因此会被报成 `inactive`。
 - 目标 turn 被取消或归档时消息可能丢失：用户按 Stop 保留；运行中被归档会被销毁；空闲归档则保留但被 gate 拦住。
 - **不承诺「不能借权限」可被强制**：消息里没有任何可表达权限的字段，但对端在自己的权限下执行对端的请求，
@@ -92,4 +94,17 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 - **`create_session` 不声明并发安全**：两个并发调用共用同一份「调用前 id 快照」，后一个可能把已有工作区
   报成 `[created]`。方向无害。
 - **别名拼写的 path 可能与输入不同**：返回的 `workspacePath` 是 `fs.realpath` 后的规范值，比较一律先规范化。
+
+## 测试覆盖到哪
+
+`node --test plugins/session-mailbox/test/*.test.mjs`（34 条）只覆盖 `lib/` 的纯函数。`index.js` 里的
+编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
+
+- **`subagents.rootOf` 抛错的两条路径**：普通子代理的 header 就带 `origin: 'subagent'`，会先在 header
+  判定命中，所以真实的 `SubagentError` 分支从未被端到端触发过。`subagentVerdict` 的单测覆盖了
+  `allow / subagent / unverifiable` 三态。
+- **`gateVerdict` 的 `already-there`**：本工具从不传 `sessionId`，控制器的「复用空白会话」分支走不到，
+  只有单测覆盖。
+- **错误文案**（`create failed after the session existed:` / `prompt failed:`）没有验收行能让它变红。
+- **`delete_workspaces` 的 `failed` 分支**：只有在注册表写失败时才出现，没有构造过。
 
