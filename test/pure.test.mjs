@@ -128,11 +128,25 @@ test('text-source', () => {
   assert.strictEqual(messageText('aaaa1111', 'ping'), 'Agent aaaa1111 sent a message:\nping')
   const src = messageSource('s-1')
   assert.deepStrictEqual(Object.keys(src), ['kind', 'form', 'senderSessionId'])
-  assert.strictEqual(src.kind, 'session-mailbox')
   // `relay` is the form DSH defines for a message another agent addressed to
   // this one. Switching it to `notice` would only buy a collapsed-row summary.
   assert.strictEqual(src.form, 'relay')
   assert.strictEqual(src.senderSessionId, 's-1')
+})
+
+test('source-host-contract', () => {
+  console.log('CASE source-host-contract')
+  // AgentMessageSource in dsh-subagent declares exactly these three keys, and the
+  // host's assertSource() validates 'agent-message' against them strictly. A
+  // private kind is not on the 15-kind whitelist at all.
+  const src = messageSource('session-abc')
+  assert.deepStrictEqual(Object.keys(src).sort(), ['form', 'kind', 'senderSessionId'])
+  assert.strictEqual(src.kind, 'agent-message')
+  assert.strictEqual(src.form, 'relay')
+  assert.strictEqual(src.senderSessionId, 'session-abc')
+  assert.strictEqual(Object.keys(src).length, 3)
+  // ids are stringified, never passed through as whatever shape the caller had
+  assert.deepStrictEqual(messageSource(7), { kind: 'agent-message', form: 'relay', senderSessionId: '7' })
 })
 
 test('resolve-title', () => {

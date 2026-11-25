@@ -1,12 +1,13 @@
 {
   "name": "dsh-session-mailbox",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./index.js",
     "./pure": "./lib/pure.js",
     "./create": "./lib/create.js",
+    "./deliver": "./lib/deliver.js",
     "./package.json": "./package.json"
   },
   "dsh": {
