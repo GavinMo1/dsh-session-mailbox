@@ -7,14 +7,16 @@
 | 工具 | 作用 |
 |---|---|
 | `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；**子代理调用会报错**（不是返回空数组——空数组会被误读成"这台机器上没有别的会话"）。 |
-| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。 |
-| `rename_session({ agent, title })` | 给另一个 top-level 会话改标题。新标题是**用户来源**的：它会**钉住**该会话，之后的自动标题生成不再覆盖它。冷会话也能改——标题是日志事件，`rename` 之前先 `resolveAgent` 把它恢复出来。空标题/多行标题拒绝；超长由 session-title 服务的 `maxTitleBytes` 拒绝。自己不能给自己改（那会让「改别人的标题」变成自述）。 |
+| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive, woke }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。`woke: true` 表示这次调用走了**冷路径**（目标原本没装进本进程，是这次调用把它从磁盘装载起来的）。 |
+| `rename_session({ agent, title })` | 给另一个 top-level 会话改标题。新标题是**用户来源**的：它会**钉住**该会话，之后的自动标题生成不再覆盖它。**改标题需要已装载的会话**：冷会话先用 `send_session_message` 按完整 id 唤醒，再改。空标题/多行标题拒绝；超长由 session-title 服务的 `maxTitleBytes` 拒绝。自己不能给自己改（那会让「改别人的标题」变成自述）。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档会话：离开侧栏与工作区分组，但**转录仍在磁盘上**，可用 `unarchiveSession`（或 GUI）恢复。逐 id 独立处理并报告 `{ archived, failed }`；已归档的 id 是 no-op。运行中的会话默认拒绝，除非 `stop: true`（先停它再归档）。**拒绝归档调用者自己**。 |
 | `delete_workspaces({ workspaceIds, force? })` | 按 id 删**工作区登记**：目录与所有会话日志都留在磁盘上，工作区离开侧栏。**不 detach**，所以工作区里的会话会丢侧栏分组——还持有会话时默认拒绝，要 `force: true`；持有调用者自己时**即使 force 也拒绝**。逐 id 独立，返回 `{ deleted, skipped, failed }`。 |
 
-`agent` 接受四种写法，按顺序匹配：**完整标题** → `name` → 完整 `id` → id 后缀 → 标题子串。任一步命中多个就报 `ambiguous` 并列出候选，不猜。
+`agent` 接受五种写法，按代码里的真实顺序匹配：`name` → 完整 `id` → **完整标题** → id 后缀 → 标题子串。任一步命中多个就报 `ambiguous` 并列出候选，不猜。冷会话（本进程没装载的）**只能按完整 id** 命中——它的标题与短名要靠活会话表，冷态下解析不出来。
+
+冷会话的 id 通常来自 `list_workspaces` 的展开行（那里打 `session: <id>`，**不含标题**）；工作区登记已被删除的会话不在任何展开行里，只能由用户或其他记录提供。
 
 标题来自 `sessionTitle` 服务（`session/title` 事件的折叠值）；`SessionHeader` 本身没有标题字段，所以缺标题时列表显示 `(untitled)`。
 
@@ -22,10 +24,20 @@
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
 
-### `rename_session` 的两条语义
+### `rename_session` 的语义
 
 - **用户来源的标题会钉住会话**：`dsh-session-title` 的三个来源里，显式重命名优先级最高，且会阻止后续自动修订。所以改一次就固定，不会被模型再改回去。
-- **改标题会唤醒冷会话**：标题是 `session/title` 日志事件，要追加就得有活的 `agent.session`，所以实现是 `sessionController.resolveAgent(id)` → `sessionTitle.rename(agent.session, title)`。副作用是那条会话被装进本进程内存——「只想改个名字」也会让它变成热会话。
+- **改标题需要已装载的会话**：标题是 `session/title` 日志事件，要追加就得有活的 `agent.session`，所以实现是 `resolveAgent(id)` → `sessionTitle.rename(agent.session, title)`。但它**不**替你把冷会话装载起来——解析只走活会话表，冷 id 在解析阶段就是 `notfound`（0.8.1 里这条承诺本来就不成立）。要给冷会话改名，先按完整 id 发一条消息把它唤醒。
+
+### 唤醒的代价
+
+`send_session_message` 遇到「本进程没装载」的会话时，会用完整 id 把它从磁盘装载起来（`sessionController.resolveAgent`），再投递。这件事的代价与边界：
+
+- 装载是一次**冷启动**：读持久化转录 → `composeAgent` 解析并 mount agent preset（这一步可能失败，失败走 `internal`）→ publish 一个 Agent。它没有 signal、没有超时。
+- 每会话一份，本插件**不提供卸载**，存活到 DSH 重启。
+- 被唤醒的会话从此出现在 `list_sessions` 和其它会话的地址簿里（`inactive`），这不是新建会话，只是把旧会话重新装进来。
+- 归档会话**拒绝**唤醒（唤醒它只会被 `ArchivedSessionGate` 拦成 blocked 空转）；冷子代理会话拒绝；`writer-held` 表示另一处持有写入权。
+- 唤醒成功、统一尾部复查前若目标被归档，会报归档错误，而 Agent 已经驻留内存。
 
 ## 收到的那条消息在界面上长什么样（以及为什么容易被忽略）
 
@@ -99,15 +111,19 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 表示「manifest 已改、包未删」，重启后不再加载，再用 `pnpm remove dsh-session-mailbox` 收尾并
 核对 `pnpm-lock.yaml` 首行仍是 `lockfileVersion: '9.0'`。
 
-## 三条卸载时不会消失的事实
+## 卸载时不会消失的四条事实
 
 1. 卸载不修改既有转录：旧会话里仍然写着 `Use send_session_message(...)`，而工具已经不存在。
 2. `source.kind === 'session-mailbox'` 的事件不进 `session export`（导出只取 `kind === 'user'`）。
 3. 系统提示词段是每个会话的持久快照，装了就在该会话里留一份，卸载也清不掉。
+4. 0.9.0 之前启动的会话保留**旧**提示词快照，不会主动知道「传完整 id 可以装载冷会话」；工具描述是全量的，所以它们仍能在被旧错误打回后读到新能力。
 
 ## 已知边界
 
-- 同一 Host 进程内的顶层会话；不同 DSH 实例 / CLI 进程互不可见；未加载（冷）会话收不到。
+- 同一 Host 进程内的顶层会话；不同 DSH 实例 / CLI 进程互不可见。
+- **未加载的会话按完整 id 可装载投递**（0.9.0 起）：`send_session_message` 会先把它从磁盘装载起来；标题与短名在冷态下解析不出来。装载后的会话会一直留在本进程内存里，直到 DSH 重启。
+- 归档会话**收不到**消息（唤醒它只会被 gate 拦成 blocked），也**不允许**被唤醒：校验在装载之前完成。
+- 工作区登记已被删除的会话不在任何 `list_workspaces` 展开行里，它的 id 只能由用户或其他记录提供。
 - 别名只在本进程当前存活集合内唯一，且随集合变化可能改变长度。
 - **标题不是稳定地址**：由 LLM 自动生成、会随新消息重新生成，也可能两个分支同名。所以标题只用于
   「用户说的是哪个」的解析，命中多个一律拒绝；要长期引用请用 `id`。
@@ -127,8 +143,10 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 
 ## 测试覆盖到哪
 
-`node --test plugins/session-mailbox/test/*.test.mjs`（34 条）只覆盖 `lib/` 的纯函数。`index.js` 里的
+`node --test plugins/session-mailbox/test/*.test.mjs`（40 条）只覆盖 `lib/` 的纯函数。`index.js` 里的
 编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
+
+- **`send_session_message` 的冷路径**：装载、准入判定顺序、统一尾部、`woke` 回执都只由活体验收覆盖。
 
 - **`subagents.rootOf` 抛错的两条路径**：普通子代理的 header 就带 `origin: 'subagent'`，会先在 header
   判定命中，所以真实的 `SubagentError` 分支从未被端到端触发过。`subagentVerdict` 的单测覆盖了
