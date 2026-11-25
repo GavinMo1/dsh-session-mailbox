@@ -65,6 +65,19 @@ export function validateMessage(text, maxBytes) {
 }
 
 /**
+ * Pre-checks for a user-owned session title.
+ * Empty and multi-line titles are refused here so the caller gets a clear
+ * message; the length cap belongs to the session-title service
+ * (`maxTitleBytes`), which rejects an over-long title with its own error.
+ */
+export function validateTitle(text) {
+  if (typeof text !== 'string') return 'empty'
+  if (text.trim() === '') return 'empty'
+  if (/[\r\n]/.test(text)) return 'multiline'
+  return undefined
+}
+
+/**
  * Resolve a user-supplied address to one entry.
  * Order: exact name, exact id, exact title, unique id suffix, unique title
  * substring. Every ambiguous step fails closed with the candidate names.
