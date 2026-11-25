@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-mailbox",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Give DeepSeek Harness sessions a mailbox: seven tools that let one top-level session list, message, rename, create, archive and unlist the sessions and workspaces around it.",
   "keywords": [
     "dsh",
@@ -49,8 +49,8 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.5",
-    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.5",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.5 <0.2.3-0 || >=0.2.3-rc.0 <0.3.0-0 || >=0.2.4-rc.0 <0.3.0-0 || >=0.3.0-rc.0 <0.4.0-0 || >=0.4.0-rc.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.5 <0.2.3-0 || >=0.2.3-rc.0 <0.3.0-0 || >=0.2.4-rc.0 <0.3.0-0 || >=0.3.0-rc.0 <0.4.0-0 || >=0.4.0-rc.0",
     "@deepseek-ai/schemastery": ">=3.19.0"
   }
 }
