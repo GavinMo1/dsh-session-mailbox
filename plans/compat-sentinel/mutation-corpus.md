@@ -66,10 +66,10 @@
 | 38 | `Agent[] → Agent[][]`（`list()` 的返回类型） | A03 / A19 | FAIL |
 | 39 | 联合成员以 `&` 续行、且不在行首（`\n  & Branded`） | A38 | FAIL |
 | 40 | 字段后面加行尾注释（`readonly cwd?: string // absolute`） | A32 | **GREEN（无害编辑；前瞻含 `//`）** |
-| 41 | `readonly description:\n    string`（pattern 内部折行） | A58 | **GREEN（已披露 BS-9；假红方向）** |
-| 42 | `SUBAGENT_DELEGATION: 120,` 去掉尾逗号 | A34 | **GREEN（已披露 BS-9；假红方向）** |
+| 41 | `readonly description:\n    string`（pattern 内部折行） | A58 | **FAIL（已披露 BS-9：pattern 内部折行会假红）** |
+| 42 | `SUBAGENT_DELEGATION: 120,` 去掉尾逗号 | A34 | **FAIL（已披露 BS-9：尾逗号被格式化器去掉会假红）** |
 | 43 | 在 `AgentStatus` 之后插一行 `/** … */` 再空行 | A04 | FAIL（前瞻允许注释，但 next 不是 `\|` 时应通过——此条用来确认注释本身不触发 FAIL，**expect GREEN**） |
-| 44 | `region` 起锚在文档注释里被复制一份（`* interface Agent {`） | A05/A38/A49 | **GREEN（已披露 BS-18；假红方向）** |
+| 44 | `region` 起锚在文档注释里被复制一份（`* interface Agent {`） | A05/A38/A49 | **FAIL（§4 S2 规则 1 的既定行为：起锚命中 2 次即 `region-mismatch`；BS-18 见 `compat-sentinel-v12-record.md` 的 R9A-16 行）** |
 | 45 | `TextBlock` 加一个必填成员 `renderedAt: number` | A62/A63 | **GREEN（已披露 BS-15；成员集合）** |
 | 46 | `ValueSchemaAnnotations.description` 改名 `doc` | A58 | **GREEN（已披露 BS-15）** |
 | 47 | `dsh-session/src/index.ts` 的 `Session.header` 改名/收窄成子集 | A32 | **GREEN（已披露 BS-15）** |
@@ -79,5 +79,7 @@
 ## 记法
 
 - **FAIL** = 断言必须变红；不变红就是「漏抓 → 按 Decision 6 停，不要为了变绿改断言，也不要新开版本号」。
-- **GREEN（已披露）** = 预期不变红，且必须能在交付报告里指到对应的 BS 条目（BS-9 / BS-12 / BS-14 / BS-15 / BS-17 / BS-18）。它们不是缺陷计数，是**已知边界**。
+- **GREEN（已披露）** = 预期不变红，且必须能在交付报告里指到对应的 BS 条目（BS-9 / BS-12 / BS-14 / BS-15 / BS-17）。它们不是缺陷计数，是**已知边界**。
+- **FAIL（已披露 BS-xx）** = 预期会变红，且红的原因已经登记为 BS-xx（假红方向或规则既定行为）。它与 `FAIL` 的区别只在「红得对不对」，判据仍是「必须变红」。
+- **BS-18 的归属**：`BS-18`（注释里复制一份声明 → 起锚计数变 2 → 假红）不在方案 §8（§8 只到 BS-16，正文冻结中不再补条目），登记在 `compat-sentinel-v12-record.md` 的 R9A-16 行。
 - 每条语料都应在仓库外的副本上做；`plugins/` 与 profile 一律不动（§5 No-go 9）。
