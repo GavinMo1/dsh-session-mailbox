@@ -531,17 +531,18 @@ STALE A02  @deepseek-ai/dsh-agent  node_modules/@deepseek-ai/dsh-agent/src/index
 | 1 | 至少一条 FAIL 或 STALE |
 | 2 | 用法错误 / 找不到或读不了 app.asar（不跑断言表） |
 
-### S6 为什么本方案里没有那两处收敛
-
-v1–v9 的 §4 S5/S6 写过「抽 resolvePeer / 抽 liveOrThrow」两步。round 8 的两条独立报告都指出：plugins/session-mailbox 在评审期间被另一个会话推到 0.9.0（commit 88f52ea，tag dsh-session-mailbox/v0.9.0），send_session_message 的 ffound.ok !== true 分支已经变成「notfound → 冷准入 → wakeAgent(id) → 投递」的 45 行实现；照旧写的 resolvePeer（在 notfound 上抛错）会把这条已发版的路径全删掉，而 §6 里那四个计数**只有删掉它才成立**。这不是「实现细节」，是范围事实：那两处收敛已不再是纯搬移。
-
-所以 v10 **把这两步整体移出本方案**（Decision 11）。若用户仍想做，应当在读到当时的 index.js 之后另开一轮，按那时的结构重写（resolvePeer 只处理 empty/self/ambiguous；liveOrThrow 只替换子代理守卫 + 归档集合 + 归档拒绝三处，不吞掉两条 arget 赋值）。
 ### S5 文档、版本与交付
 
 - `AGENTS.md` 的「改完必须做的验证」代码块之后加一行（`默认` 位置；升 DSH 和 `git pull` 之后都会看这一段）：
   `升级 DSH 或 pull 本仓库后：node scripts/compat-check.mjs（读 app.asar 断言宿主接口；非 0 退出＝先别升级，见 FAIL 行指到的插件位置）。`
 - 提交：`git add scripts/compat-check.mjs AGENTS.md plans/compat-sentinel` → message `scripts: add a compat sentinel that asserts the host plugin API from app.asar` → `git push`。
 - 不改任何 `plugins/` 文件、不改任何 `package.json` 的 `version`、不打 tag：本方案只交付哨兵。原先写在这里的两处收敛（`rresolvePeer` / `liveOrThrow`）已从本方案移除，见 §4 S4 的说明。
+
+### S6 为什么本方案里没有那两处收敛
+
+v1–v9 的 §4 S5/S6 写过「抽 resolvePeer / 抽 liveOrThrow」两步。round 8 的两条独立报告都指出：plugins/session-mailbox 在评审期间被另一个会话推到 0.9.0（commit 88f52ea，tag dsh-session-mailbox/v0.9.0），send_session_message 的 ffound.ok !== true 分支已经变成「notfound → 冷准入 → wakeAgent(id) → 投递」的 45 行实现；照旧写的 resolvePeer（在 notfound 上抛错）会把这条已发版的路径全删掉，而 §6 里那四个计数**只有删掉它才成立**。这不是「实现细节」，是范围事实：那两处收敛已不再是纯搬移。
+
+所以 v10 **把这两步整体移出本方案**（Decision 11）。若用户仍想做，应当在读到当时的 index.js 之后另开一轮，按那时的结构重写（resolvePeer 只处理 empty/self/ambiguous；liveOrThrow 只替换子代理守卫 + 归档集合 + 归档拒绝三处，不吞掉两条 arget 赋值）。
 
 ## 5. No-go 项
 
