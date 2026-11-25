@@ -149,4 +149,4 @@ node --test plugins/user-model/tests/um.test.mjs
 - `retire` and `restore` use `fs.renameSync` inside `entries/`, which is one volume, so the move is atomic; a half-moved entry cannot exist.
 - A failed commit or push does **not** roll the entry back — it stays readable locally and `um sync` retries. `sync` groups the changed paths by entry id, because a retire shows up as a deletion plus an addition and passing only the old name makes `git add` fail on a pathspec that no longer exists.
 - Ordering is `date` descending first: when two entries cover the same subject, the newer one wins, and that is a property of the sort rather than something the prompt has to remember.
-- 维护待办（触发条件那个还没决定的问题、以及别的已知缺口）在仓库根目录的 `TODO.md`，不要只记在对话里。
+- 维护待办与已否决方向：user-model 自己的写在仓库根 `design.md`；其他插件的写在 `docs/plugin-decisions.md`。不要只记在对话里。
