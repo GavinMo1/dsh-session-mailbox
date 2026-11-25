@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Edit history messages",
+    "description": "Adds an edit control under every user message: continue in a new branch, or rewrite the original session in place (history is cut there and the original is archived)."
+  }
+}

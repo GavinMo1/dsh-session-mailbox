@@ -1,0 +1,7 @@
+# One Host row mounts the bundle; the browser half is discovered through the
+# package's `dsh.client` manifest and served by the Client module registry.
+# The editing surface itself is purely Client-side (session history + fork +
+# prompt), so the Host half is intentionally empty.
+- insert:
+    - id: message-editor
+      name: 'dsh-message-editor'
