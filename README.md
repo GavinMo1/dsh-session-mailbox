@@ -27,7 +27,6 @@ scripts/
   session-log.mjs         # 读某个会话的 durable 转录：提示词 / 工具调用 / 工具返回 / 回答
 design.md                 # user-model 的设计：目标、三层分工、刻意不做的取舍、已否决的方向
 docs/packaging.md         # 把一个插件打成 tgz 装进 profile（只给第三方插件用，例：dsh-unrestricted）
-docs/plugin-decisions.md  # 其他插件的决策与遗留（原 TODO.md；不要只记在对话里）
 ```
 
 ## 新机器接线
@@ -94,6 +93,14 @@ git checkout <commit-or-tag> -- plugins/session-mailbox
 2. `node scripts/link-plugins.mjs --dry-run` 确认它被扫到。
 3. `--apply` + 重载。
 4. 打 tag：`git tag <plugin-name>/v<version>`，`git push --tags`。
+
+## 其他插件的活事实
+
+历史与取舍不进文档：需要时看 git 历史（`git log --oneline -- <path>`）。这里只留**现在仍然成立、会踩坑**的几句：
+
+- `plugins/dsh-input-history`、`plugins/dsh-message-editor`、`plugins/blank-draft-handoff` 是**上游发布产物**（IIFE 打包，`grep '^export '` 命中 0，仓库里没有源码）。**不要手改它们**——它们与上游逐字节一致才是它们的价值；升级 = 用新 tgz 整包替换。代价是这三个没有自动化测试，回归靠人工点：↑/↓ 翻历史、改写一条已发消息、草稿接手。
+- `dsh-unrestricted` 是**第三方**（`yexi-by/dsh-unrestricted`，MIT），不进本仓库；本机上它唯一的安装源是那个 tgz（`backups/` 里有副本），**别当临时文件清掉**。升级步骤见 `docs/packaging.md`。
+- `dsh-branch-switcher` 已弃用下线，实现留在 tag `dsh-branch-switcher/v1.1.0`。
 
 ## 已知约束
 
