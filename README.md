@@ -8,6 +8,7 @@
 |---|---|
 | `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；子代理内部调用返回空数组。 |
 | `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。 |
+| `rename_session({ agent, title })` | 给另一个 top-level 会话改标题。新标题是**用户来源**的：它会**钉住**该会话，之后的自动标题生成不再覆盖它。冷会话也能改——标题是日志事件，`rename` 之前先 `resolveAgent` 把它恢复出来。空标题/多行标题拒绝；超长由 session-title 服务的 `maxTitleBytes` 拒绝。自己不能给自己改（那会让「改别人的标题」变成自述）。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档会话：离开侧栏与工作区分组，但**转录仍在磁盘上**，可用 `unarchiveSession`（或 GUI）恢复。逐 id 独立处理并报告 `{ archived, failed }`；已归档的 id 是 no-op。运行中的会话默认拒绝，除非 `stop: true`（先停它再归档）。**拒绝归档调用者自己**。 |
@@ -20,6 +21,11 @@
 空闲目标 → `followup`（开新 turn）；运行中的目标 → `steer`（下一个 step）。
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
+
+### `rename_session` 的两条语义
+
+- **用户来源的标题会钉住会话**：`dsh-session-title` 的三个来源里，显式重命名优先级最高，且会阻止后续自动修订。所以改一次就固定，不会被模型再改回去。
+- **改标题会唤醒冷会话**：标题是 `session/title` 日志事件，要追加就得有活的 `agent.session`，所以实现是 `sessionController.resolveAgent(id)` → `sessionTitle.rename(agent.session, title)`。副作用是那条会话被装进本进程内存——「只想改个名字」也会让它变成热会话。
 
 ## 收到的那条消息在界面上长什么样（以及为什么容易被忽略）
 

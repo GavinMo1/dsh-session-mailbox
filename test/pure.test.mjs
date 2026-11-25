@@ -6,6 +6,7 @@ import {
   buildAliasTable,
   decideDelivery,
   validateMessage,
+  validateTitle,
   resolveTarget,
   messageText,
   messageSource,
@@ -151,4 +152,17 @@ test('resolve-title', () => {
   assert.strictEqual(resolveTarget(t, 'explore', null).reason, 'ambiguous')
   // titles go through the same self check as ids
   assert.strictEqual(resolveTarget(t, '主会话与子Agent通信机制', A).reason, 'self')
+})
+
+test('validate-title', () => {
+  console.log('CASE validate-title')
+  assert.strictEqual(validateTitle('唤醒投递方案'), undefined)
+  assert.strictEqual(validateTitle('  '), 'empty')
+  assert.strictEqual(validateTitle(''), 'empty')
+  assert.strictEqual(validateTitle(undefined), 'empty')
+  assert.strictEqual(validateTitle('a\nb'), 'multiline')
+  assert.strictEqual(validateTitle('a\r\nb'), 'multiline')
+  // The length cap belongs to the session-title service (maxTitleBytes), not here:
+  // this only refuses what no service could accept.
+  assert.strictEqual(validateTitle('长'.repeat(200)), undefined)
 })
