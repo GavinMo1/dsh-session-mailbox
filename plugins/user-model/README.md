@@ -15,9 +15,11 @@ Two parts, deliberately separated:
 | Tool | What it does |
 |---|---|
 | `user_model_search` | 1–3 content words → the newest ≤3 matching entries plus `# total:`; staged entries carry a trailing ` [pending]` |
-| `user_model_append` | **stage** an entry on this machine only: no commit, no push |
-| `user_model_flush` | approve everything staged, commit the batch once, push once |
+| `user_model_append` | **stage** an entry on this machine only: no commit, no push. Top-level sessions only |
+| `user_model_flush` | approve everything staged, commit the batch once, push once. Top-level sessions only |
 | `user_model_approve` | one-off: publish a single staged entry on its own |
+
+**写入是顶层会话的决定，不是子代理的。** `user_model_append` 与 `user_model_flush` 在调用者是子代理时**直接拒绝**（`session.header.origin === 'subagent'`）：子代理该做的是把事实回报给派它的会话，由那个会话决定记不记、什么时候发布。否则每个临时 worker 都能往同一个 `.pending` 队列里塞条目，而没人能说清一条记忆是谁写的。读取（`user_model_search`）对子代理完全开放。
 
 Recording and publishing are separate calls on purpose. `user_model_append` writes `entries/.pending/<id>.md` and stops there; `user_model_flush` moves every staged entry into `entries/`, stamps the approval, makes **one** commit for the batch and **one** push. A burst of three entries therefore costs one network round trip instead of three, which is what the library wants when it grows a few entries a day.
 

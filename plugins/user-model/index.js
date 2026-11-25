@@ -18,6 +18,7 @@ const PROMPT = [
   'user_model_append only stages the entry on this machine: it does not commit and does not push, and the entry is not published. Call user_model_flush to publish the batch — one commit and one push for everything staged, which is why you collect a few entries first instead of flushing after each one. A staged entry is already searchable and shows a trailing " [pending]" in the results, so search before you append to avoid recording the same fact twice. Flush at a natural checkpoint: three to five staged entries, the end of a working session, or when the user asks for it.',
   'Do not ask the user to approve anything, and do not wait for a second step after an append — the user reviews, edits and retires entries on the local page instead (the CLI command is `um serve`). Record at most one entry per turn, and never two about the same subject.',
   'There is no "replaced" flag: to change an earlier decision, record a new entry; the newer date wins.',
+  'Recording and publishing are top-level operations: user_model_append and user_model_flush refuse when the caller is a subagent. A subagent reports the fact to the session that delegated it, and that session records it.',
 ].join('\n')
 
 export function apply(ctx) {
@@ -71,7 +72,7 @@ export function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: 'user_model_append',
-    description: 'Stage one entry in the user-model library. It is written to entries/.pending on this machine only: nothing is committed, nothing is pushed, and the entry is not published until user_model_flush runs. A staged entry is already searchable and shows a trailing " [pending]". Record only when all three hold: the user\'s own sentence carries durable force (以后 / 今后 / 下次 / 别再 / 不要再 / 记住 / 统一 / 一律 / 默认 / 永远, or a refusal with its reason, or the same request repeated across two different tasks); it restates as "from now on, when Y, do Z"; and user_model_search finds no newer entry on the same subject. Never record the task at hand, a one-off choice, a temporary constraint, a mood, or your own guess. Record at most one entry per turn, and never two about the same subject: stage a few, then call user_model_flush once. The user reviews and edits entries on the local page instead of approving them here. slug is a short kebab-case name you choose (a-z, digits, dashes). title is one line, at most 60 characters. body is at most 400 characters and may contain newlines. kind is "fact" for an identity-level trait (profession, role, field of study, a long-running constraint of schedule or body), "decision" for something that was decided.',
+    description: 'Stage one entry in the user-model library. Top-level sessions only: a subagent call is refused, because recording is a decision the delegating session owns. It is written to entries/.pending on this machine only: nothing is committed, nothing is pushed, and the entry is not published until user_model_flush runs. A staged entry is already searchable and shows a trailing " [pending]". Record only when all three hold: the user\'s own sentence carries durable force (以后 / 今后 / 下次 / 别再 / 不要再 / 记住 / 统一 / 一律 / 默认 / 永远, or a refusal with its reason, or the same request repeated across two different tasks); it restates as "from now on, when Y, do Z"; and user_model_search finds no newer entry on the same subject. Never record the task at hand, a one-off choice, a temporary constraint, a mood, or your own guess. Record at most one entry per turn, and never two about the same subject: stage a few, then call user_model_flush once. The user reviews and edits entries on the local page instead of approving them here. slug is a short kebab-case name you choose (a-z, digits, dashes). title is one line, at most 60 characters. body is at most 400 characters and may contain newlines. kind is "fact" for an identity-level trait (profession, role, field of study, a long-running constraint of schedule or body), "decision" for something that was decided.',
     parameters: {
       slug: { type: 'string', required: true, description: 'Short kebab-case identifier, a-z, digits and dashes, at most 41 characters.' },
       kind: { type: 'string', required: true, enum: ['fact', 'decision'], description: 'fact for a stable trait or preference; decision for something that was decided.' },
@@ -94,7 +95,14 @@ export function apply(ctx) {
         text: 'staged: ' + value.id + ' (pending: ' + value.pending + ', not published — call user_model_flush)',
       }],
     },
-    async execute(args) {
+    async execute(args, exec) {
+      // Recording is a top-level decision. A subagent's job is to report the fact
+      // to the session that delegated it, which owns the library and the user's
+      // attention; otherwise every temporary worker can append to the same pending
+      // queue and nobody can tell where an entry came from.
+      if (exec.agent?.session.header.origin === 'subagent') {
+        throw new Error('user_model_append is for top-level sessions; report the fact to the session that delegated you and let it record it')
+      }
       const staged = store.append(root, {
         slug: args.slug,
         kind: args.kind,
@@ -111,10 +119,15 @@ export function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: 'user_model_flush',
-    description: 'Publish everything user_model_append staged: approve each pending entry, commit them together, and push once. Call it at a natural checkpoint — three to five staged entries, the end of a working session, or when the user asks — not after every append. Reports how many entries were published and lists any entry left staged with the reason. If it reports a commit or push failure, the entries are already on disk and searchable: do not append them again, run the CLI `um sync` later.',
+    description: 'Publish everything user_model_append staged: approve each pending entry, commit them together, and push once. Top-level sessions only: a subagent call is refused, because the push goes to the user\'s remote library. Call it at a natural checkpoint — three to five staged entries, the end of a working session, or when the user asks — not after every append. Reports how many entries were published and lists any entry left staged with the reason. If it reports a commit or push failure, the entries are already on disk and searchable: do not append them again, run the CLI `um sync` later.',
     parameters: {},
     output: textOutput,
-    async execute() {
+    async execute(_args, exec) {
+      // Publishing pushes to the user's remote library: a top-level session owns
+      // that decision, exactly like recording does.
+      if (exec.agent?.session.header.origin === 'subagent') {
+        throw new Error('user_model_flush is for top-level sessions; leave the staged batch for the session that owns the library')
+      }
       const result = store.flush(root, 'agent, ' + store.localDate() + ' (flush)')
       if (result.ok !== true) throw new Error(result.error)
       return { text: result.lines.join('\n') }
