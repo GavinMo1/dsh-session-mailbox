@@ -26,6 +26,7 @@ scripts/
   asar.mjs                # 直接读 app.asar 里的随包源码（不落盘解压）
   session-log.mjs         # 读某个会话的 durable 转录：提示词 / 工具调用 / 工具返回 / 回答
 design.md                 # user-model 的设计：目标、三层分工、刻意不做的取舍、已否决的方向
+docs/packaging.md         # 把一个插件打成 tgz 装进 profile（只给第三方插件用，例：dsh-unrestricted）
 TODO.md                   # 其他插件的待办与已知缺口（不要只记在对话里）
 ```
 

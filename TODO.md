@@ -26,8 +26,9 @@ user-model 的设计取舍与已经否决的方向都在 `design.md`，那份是
 
 **还差的**：
 
-- **测试**。四个里只有一个本来有测试（`dsh-branch-switcher` 的 `test/tree.test.mjs`，15 项纯函数测试），收进来时源码只剩打包产物，`test/` 没留下；另外三个本来就没有。这是这批插件目前最大的缺口：改 `client.js` 之后没有任何东西能告诉你哪里坏了，只能手动点。补的时候：`branch-switcher` 的 `client.js` 里 `__test` 导出还在，按 README 里的描述可以直接把测试写回来；另外三个没有 `__test`，得先把纯逻辑抽出来。
-- **`C:\Users\27017\dsh-local\plugins\dist\` 里那两份 `INSTALL.md` 已经过时**：它们详细写着 `dsh-globe-panel` 和 `dsh-claude-style` 的安装步骤，而那两套源码 2026-11-25 已删（进回收站）。留着当历史存档可以，但别再照着做。
+- **测试**。`dsh-branch-switcher` 的回归测试 2026-11-25 已补回：`test/tree.test.mjs`，18 个用例，跑法见它的 README。**另外三个仍然是零覆盖**（`dsh-input-history`、`dsh-message-editor`、`blank-draft-handoff`）：它们的 `client.js` 里没有 `__test` 导出，要补得先把纯逻辑抽出来，成本比 `branch-switcher` 高一个量级。改这三个的 `client.js` 之后没有任何自动化能告诉你哪里坏了，只能手动点。
+- **说明文档已搬进仓库**，产物目录不再放文档：原来 `C:\Users\27017\dsh-local\plugins\dist\` 下的 `INSTALL.md` 和 `dsh-local-plugins-1.0.0-INSTALL.md` 各 18/12 KB，90% 在讲已删除的 `dsh-globe-panel` / `dsh-claude-style`，2026-11-25 已提炼成仓库里的 [`docs/packaging.md`](docs/packaging.md)（打包与校验流程，含升级 `dsh-unrestricted` 的完整步骤）后进回收站；同目录那个 `dsh-local-plugins-1.0.0-install.ps1` 一键安装脚本也一并删了（它自己写着已过时，且引用的 globe-panel tgz 与主题渲染器目录都已不存在）。三份都在 `backups\` 里留了副本。
+- **`dist\` 现在只剩 tgz 产物**：6 个包，其中 5 个是四个插件 + `blank-draft-handoff` 的旧安装源（现已改成 `link:`），1 个是 `dsh-unrestricted`（还在用）。
 - **换机器要重跑 `--apply`**：`link:` 存的是本机绝对路径，这是设计如此（见根 README「新机器接线」），不是缺口，但容易忘。
 
 ---
@@ -47,6 +48,6 @@ user-model 的设计取舍与已经否决的方向都在 `design.md`，那份是
 
 **因此**：
 
-- 那个 tgz 是这台机器上的**唯一副本**（源码目录从未留下）。别和临时文件一起清掉。
-- 升级靠手动：去上游取新版本、自己打包、改 profile 的 spec、`pnpm install`。
+- 那个 tgz 是这台机器上**唯一的安装源**（源码目录从未留下）。2026-11-25 已额外复制一份到仓库的 `backups\dsh-unrestricted-0.2.8.tgz`（`backups/` 在 `.gitignore` 里），两份 SHA256 一致（`0DD17283…30BCA3`），别和临时文件一起清掉。
+- 升级靠手动：去上游取新版本、自己打包、改 profile 的 spec、`pnpm install`。完整步骤见 [`docs/packaging.md`](docs/packaging.md)。
 - 它和本仓库其他插件不是一个范畴（往系统提示里融规则），不要因为它「也装在同一个 profile 里」就顺手收进来。
