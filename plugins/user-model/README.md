@@ -15,10 +15,10 @@ Two parts, deliberately separated:
 | Tool | What it does |
 |---|---|
 | `user_model_search` | 1–3 content words → the newest ≤3 matching entries plus `# total:` |
-| `user_model_append` | stage an entry in `entries/.pending/`, returns its `id` |
-| `user_model_approve` | move it to `entries/`, stamp the approval, commit and push |
+| `user_model_append` | record an entry: lands it, commits and pushes in one call |
+| `user_model_approve` | leftovers only: move a staged entry to `entries/`, stamp it, commit and push |
 
-A staged entry is **not** searchable. That is the point: the read side only ever sees what the user agreed to keep.
+`user_model_append` lands and pushes in one call, so an entry the agent records is searchable immediately — there is no chat-side approval step. The user reviews, edits and retires entries on the local page (`um serve`). The staging area still exists for the CLI (`um append` then `um approve`) and for anything a failed landing left behind.
 
 ## CLI
 
