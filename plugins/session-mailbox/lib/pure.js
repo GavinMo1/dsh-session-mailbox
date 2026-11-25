@@ -163,9 +163,50 @@ export function resolveTarget(table, arg, selfId) {
   return { ok: false, reason: 'notfound', candidates: [] }
 }
 
-/** The delivered text: sender identity plus the sender's words. */
-export function messageText(senderName, text) {
-  return `Agent ${senderName} sent a message:\n${text}`
+/**
+ * Longest sender title carried in a message header, in code points.
+ * A header is a label, not a paragraph: a 200-character auto-title would push
+ * the sender's actual words off the screen.
+ */
+export const SENDER_TITLE_LIMIT = 40
+
+/**
+ * A session title made safe for one line of a message header.
+ *
+ * Returns `undefined` when nothing usable is left, so the caller falls back to
+ * the short name alone. Control characters (newlines included) would let a
+ * title break the frame or start a line of its own, so they become spaces and
+ * runs of whitespace collapse. Truncation counts code points, not UTF-16 code
+ * units: slicing by code unit can split a surrogate pair and deliver half an
+ * emoji.
+ */
+export function senderTitle(title) {
+  if (typeof title !== 'string') return undefined
+  const flat = title.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (flat === '') return undefined
+  const points = Array.from(flat)
+  if (points.length <= SENDER_TITLE_LIMIT) return flat
+  return points.slice(0, SENDER_TITLE_LIMIT - 1).join('') + '…'
+}
+
+/**
+ * The delivered text: sender identity plus the sender's words.
+ *
+ * The first line keeps the shape the host parses: `AGENT_MESSAGE_PREFIX` in
+ * dsh-experimental-client-ui-stats (`src/client/stats-fold.ts`) is
+ * `/^Agent (\S+) sent a message:/u` — `\S+` means a title with a space in it
+ * cannot go there without breaking the match, and a title commonly has spaces.
+ * So the readable identity is added as a second line instead: the prefix (and
+ * the sender badge derived from its capture) behaves exactly as it did before
+ * 0.9.2 for every title, and the recipient still sees who is speaking.
+ *
+ * The body is appended verbatim: no trimming, no re-wrapping, no escaping.
+ */
+export function messageText(senderName, text, title) {
+  const head = `Agent ${senderName} sent a message:`
+  const named = senderTitle(title)
+  if (named === undefined) return `${head}\n${text}`
+  return `${head}\n来自「${named}」(${senderName})\n${text}`
 }
 
 /**

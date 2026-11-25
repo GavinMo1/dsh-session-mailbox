@@ -97,6 +97,32 @@ A46 从「只断言 `form: 'relay'`」升级成「断言 `AgentMessageSource` �
   `relay`, and the sender's session id」），全仓只有 `return { … }` 那一行能命中 site。以后改这段注释不要
   把三键写法贴回去。
 
+## 五、session-mailbox 0.9.2 的消息头（读到了宿主前缀正则，但**没有**加断言，理由在下面）
+
+0.9.2 让消息头带上发送方标题之前，先核对了宿主对这段前缀的解析。实际读到的三处（`scripts/asar.mjs cat` 取自
+`dsh-experimental-client-ui-stats`）：
+
+- `src/client/stats-fold.ts`：`const AGENT_MESSAGE_PREFIX = /^Agent (\S+) sent a message:/u`，`triggerSenderOf()`
+  用捕获组当发送者徽标，捕获值是裸 uuid 时返回 `null`；
+- `src/client/StatsTable.tsx`：`const AGENT_FRAME = /^Agent \S+ sent a message:/u` 与
+  `.replace(/^Agent \S+ sent a message:\s*/u, '')`（折叠/剥前缀）。
+
+结论写在插件里：`\S+` 不容空格，所以标题走**第二行**，第一行与 0.9.1 逐字节相同。
+
+**为什么这次不往 `scripts/compat-check.mjs` 加断言（A65 之类）**：
+
+1. 这三条正则住在 `dsh-experimental-client-ui-stats` 的 **client bundle 源码**里，而 plugins 侧的 site 只能写在
+   `index.js` / `lib/pure.js` 的代码文本上。要锁住它，插件里就得出现一段「为了被 grep 而存在」的字面量副本，
+   这正是 BS-6 警告的那种常绿假锁。
+2. 即使宿主改了这两条正则，插件的**行为**也不会坏：第一行只是被解析得更少（徽标退回通用、前缀剥不掉），
+   消息投递、`source` 三键、回执字段全都不受影响。它属于「显示降级」，不是 A 表定义的「插件接口断裂」。
+3. 0.9.2 的选择是**把第一行保持原样**，即对这两条正则的依赖降到「本来就命中」——不新增可断裂面。
+
+如果要补登，建议的形态是 A65：`entry` 锁 `dsh-experimental-client-ui-stats/src/client/stats-fold.ts`，
+`patterns: ['const AGENT_MESSAGE_PREFIX = \\^Agent \\(\\\\S\\+\\) sent a message:']`，`sites` 指向
+`plugins/session-mailbox/lib/pure.js` 里 `messageText` 的模板行。这属于「新增断言表条目」，本轮按任务约定
+**没有动**，留待 Author 决定。
+
 ## 记法
 
 - **FAIL** = 断言必须变红；不变红就是「漏抓 → 按 Decision 6 停，不要为了变绿改断言，也不要新开版本号」。
