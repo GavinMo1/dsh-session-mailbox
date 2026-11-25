@@ -17,8 +17,9 @@ plugins/
     package.json          # 必须含 "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
     cordis.patch.yml
     index.js              # DSH plugin 入口，导出 name / inject / Config / apply
-    lib/                  # 纯逻辑，零依赖
-    test/                 # node --test，零依赖
+    client.js             # 浏览器半边（Client 插件才有），走 window.__ModuleLoader__.load
+    lib/                  # 纯逻辑，零依赖（Host 插件才有）
+    test/                 # node --test，零依赖（有的话）
     README.md
 scripts/
   link-plugins.mjs        # 把本仓库所有插件接到某个 profile 上（幂等）
@@ -45,7 +46,7 @@ node scripts/link-plugins.mjs --apply       # 备份 profile 的 package.json，
 与本仓库无关。处理：
 
 1. 只保留包的裸名（`dsh-synapse: true`），删掉带 `@` 的非精确条目；先备份那个 yaml。
-2. 再跑 `pnpm --dir <profile> install --ignore-scripts`。本仓库两个插件都没有 build 脚本，可以安全跳过。
+2. 再跑 `pnpm --dir <profile> install --ignore-scripts`。本仓库的插件都没有 build 脚本（`client.js` 是手写的浏览器 bundle，不是构建产物），可以安全跳过。
 
 ## 升级
 
