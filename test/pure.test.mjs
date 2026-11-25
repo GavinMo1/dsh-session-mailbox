@@ -143,28 +143,28 @@ const HOST_PREFIX = /^Agent (\S+) sent a message:/u
 
 test('header-titled', () => {
   console.log('CASE header-titled')
-  const out = messageText('bd1c8365', 'ping', '统筹')
-  assert.strictEqual(out, 'Agent bd1c8365 sent a message:\n来自「统筹」(bd1c8365)\nping')
+  const out = messageText('a1b2c3d4', 'ping', 'release')
+  assert.strictEqual(out, 'Agent a1b2c3d4 sent a message:\n来自「release」(a1b2c3d4)\nping')
   const lines = out.split('\n')
   // line 1 is the prefix the host parses, and its capture is still the short name
   const m = HOST_PREFIX.exec(lines[0])
   assert.notStrictEqual(m, null)
-  assert.strictEqual(m[1], 'bd1c8365')
+  assert.strictEqual(m[1], 'a1b2c3d4')
   // the readable identity is on line 2: title plus the short name
-  assert.ok(lines[1].includes('统筹'), lines[1])
-  assert.ok(lines[1].includes('bd1c8365'), lines[1])
+  assert.ok(lines[1].includes('release'), lines[1])
+  assert.ok(lines[1].includes('a1b2c3d4'), lines[1])
   // a title with spaces must not disturb the parsed prefix
-  const spaced = messageText('bd1c8365', 'ping', '统筹 lead 会话')
+  const spaced = messageText('a1b2c3d4', 'ping', 'release lead session')
   assert.notStrictEqual(HOST_PREFIX.exec(spaced.split('\n')[0]), null)
-  assert.ok(spaced.split('\n')[1].includes('统筹 lead 会话'))
+  assert.ok(spaced.split('\n')[1].includes('release lead session'))
 })
 
 test('header-untitled', () => {
   console.log('CASE header-untitled')
   // exactly today's shape: no second line at all
   for (const title of [undefined, null, '', '   ', '\n', 42, {}]) {
-    assert.strictEqual(messageText('bd1c8365', 'ping', title), 'Agent bd1c8365 sent a message:\nping')
-    assert.strictEqual(messageText('bd1c8365', 'ping', title).split('\n').length, 2)
+    assert.strictEqual(messageText('a1b2c3d4', 'ping', title), 'Agent a1b2c3d4 sent a message:\nping')
+    assert.strictEqual(messageText('a1b2c3d4', 'ping', title).split('\n').length, 2)
   }
   assert.strictEqual(senderTitle(undefined), undefined)
   assert.strictEqual(senderTitle('  \t '), undefined)
@@ -176,8 +176,8 @@ test('header-title-sanitize', () => {
   assert.strictEqual(senderTitle('a\nb'), 'a b')
   assert.strictEqual(senderTitle('a\r\nb\tc'), 'a b c')
   assert.strictEqual(senderTitle('  pad  '), 'pad')
-  const multi = messageText('bd1c8365', 'ping', 'line1\nline2')
-  assert.strictEqual(multi.split('\n')[1], '来自「line1 line2」(bd1c8365)')
+  const multi = messageText('a1b2c3d4', 'ping', 'line1\nline2')
+  assert.strictEqual(multi.split('\n')[1], '来自「line1 line2」(a1b2c3d4)')
   // over-long titles are cut to SENDER_TITLE_LIMIT code points, ellipsis included
   const long = '长'.repeat(200)
   const cut = senderTitle(long)
@@ -200,14 +200,14 @@ test('header-body-verbatim', () => {
   // The body is appended as given: its own lines, leading spaces, markdown and
   // an `Agent ... sent a message:`-looking first line all survive untouched.
   const body = 'Agent zzzz9999 sent a message:\n  indented\n\n```js\n1\n```\n  '
-  const out = messageText('bd1c8365', body, '统筹')
+  const out = messageText('a1b2c3d4', body, 'release')
   assert.strictEqual(out.split('\n').slice(2).join('\n'), body)
-  assert.strictEqual(out.slice(0, out.length - body.length), 'Agent bd1c8365 sent a message:\n来自「统筹」(bd1c8365)\n')
+  assert.strictEqual(out.slice(0, out.length - body.length), 'Agent a1b2c3d4 sent a message:\n来自「release」(a1b2c3d4)\n')
   // no title, no header line: the body follows line 1 and is not truncated
-  const plain = messageText('bd1c8365', body, undefined)
-  assert.strictEqual(plain.slice('Agent bd1c8365 sent a message:\n'.length), body)
+  const plain = messageText('a1b2c3d4', body, undefined)
+  assert.strictEqual(plain.slice('Agent a1b2c3d4 sent a message:\n'.length), body)
   // the body is not what gets sanitized: only the title is
-  assert.ok(messageText('bd1c8365', 'a\nb', 'X').endsWith('\na\nb'))
+  assert.ok(messageText('a1b2c3d4', 'a\nb', 'X').endsWith('\na\nb'))
 })
 
 test('source-host-contract', () => {
