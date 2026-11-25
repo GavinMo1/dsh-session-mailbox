@@ -1,8 +1,38 @@
 {
   "name": "dsh-session-mailbox",
-  "version": "0.9.2",
-  "private": true,
+  "version": "0.10.0",
+  "description": "Give DeepSeek Harness sessions a mailbox: seven tools that let one top-level session list, message, rename, create, archive and unlist the sessions and workspaces around it.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "agent",
+    "session",
+    "sessions",
+    "mailbox",
+    "messaging",
+    "multi-agent"
+  ],
+  "license": "MIT",
+  "author": "GavinMo1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GavinMo1/dsh-session-mailbox.git",
+    "directory": "."
+  },
+  "homepage": "https://github.com/GavinMo1/dsh-session-mailbox#readme",
+  "bugs": {
+    "url": "https://github.com/GavinMo1/dsh-session-mailbox/issues"
+  },
   "type": "module",
+  "files": [
+    "index.js",
+    "lib/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": "./index.js",
     "./pure": "./lib/pure.js",
@@ -10,14 +40,17 @@
     "./deliver": "./lib/deliver.js",
     "./package.json": "./package.json"
   },
+  "engines": {
+    "node": ">=24.9.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/dsh-llm": "*",
-    "@deepseek-ai/schemastery": "*"
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.5",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.5",
+    "@deepseek-ai/schemastery": ">=3.19.0"
   }
 }

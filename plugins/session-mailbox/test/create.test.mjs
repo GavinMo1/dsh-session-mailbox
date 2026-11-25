@@ -85,14 +85,14 @@ test('pick-empty-registry', () => {
 
 test('same-path-case', () => {
   console.log('CASE same-path-case')
-  assert.strictEqual(samePath('C:\\Users\\Ruike', 'c:\\users\\ruike'), true)
+  assert.strictEqual(samePath('C:\\Users\\Example', 'c:\\users\\example'), true)
   assert.strictEqual(samePath('C:\\Users\\a', 'C:\\Users\\b'), false)
 })
 
 test('same-path-trailing', () => {
   console.log('CASE same-path-trailing')
-  assert.strictEqual(samePath('C:\\Users\\ruike\\', 'C:\\Users\\ruike'), true)
-  assert.strictEqual(samePath('C:\\Users\\ruike\\\\', 'C:\\Users\\RUike'), true)
+  assert.strictEqual(samePath('C:\\Users\\example\\', 'C:\\Users\\example'), true)
+  assert.strictEqual(samePath('C:\\Users\\example\\\\', 'C:\\Users\\EXAMPLE'), true)
 })
 
 test('same-path-drive-root', () => {
