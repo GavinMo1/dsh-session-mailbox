@@ -24,6 +24,7 @@ const MAILBOX_PROMPT = [
   'When your user names a session by its title, pass that title to send_session_message: a unique title, a `name`, or a full `id` all address the same session. A title shared by several sessions is refused with the candidate names instead of being guessed.',
   'Use send_session_message({ agent: "<name or title>", message: "..." }) to queue one text message to one of them.',
   'The call confirms queueing, not reading: an idle peer is woken and reads it in the new turn; a running peer reads it at its next step; if that turn is cancelled or archived first, the message can be lost. When the answer matters, ask the peer to reply.',
+  'An inbound message from another session starts with `Agent <short name> sent a message:`, and — when the sender has a title — a second line `来自「<title>」(<short name>)` naming it. That line is the sender\'s own title, the same one list_sessions prints; two sessions sharing a title are still told apart by the short name.',
   'A reply is another send_session_message call from that peer.',
   'A cold session (one this process does not hold) can still receive a message: pass its full session id and the tool loads it from disk first. Its title and short name do not resolve while it is cold; list_sessions lists only loaded sessions, so a cold session\'s id usually comes from list_workspaces (expand a workspace and read its "session: <id>" rows).',
   '`send_message` and `list_agents` address your subagent tree; these two tools address other top-level sessions.',
@@ -210,6 +211,10 @@ export function apply(ctx, config = {}) {
       const list = rows()
       const senderRow = list.find((r) => r.id === String(exec.agent.id))
       const senderName = senderRow?.name ?? String(exec.agent.id).slice(-8)
+      // The title comes from the sender's own row: `rows()` already reads it
+      // through `titleOf`, so a second scan of the session table would only
+      // widen the window in which the two reads disagree.
+      const senderTitle = senderRow?.title
 
       const found = pure.resolveTarget(list, args.agent, String(exec.agent.id))
 
@@ -298,7 +303,7 @@ export function apply(ctx, config = {}) {
       const statusBefore = pure.pageStatus(target.status)
       const primitive = pure.primitiveFor(target.status)
       const message = createUserMessage({
-        content: [{ type: 'text', text: pure.messageText(senderName, args.message) }],
+        content: [{ type: 'text', text: pure.messageText(senderName, args.message, senderTitle) }],
         source: pure.messageSource(exec.agent.id),
       })
       // Queue it unattributed, then put it on disk: withoutInitiator keeps the

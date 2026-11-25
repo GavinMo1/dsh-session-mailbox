@@ -7,7 +7,7 @@
 | 工具 | 作用 |
 |---|---|
 | `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；**子代理调用会报错**（不是返回空数组——空数组会被误读成"这台机器上没有别的会话"）。 |
-| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive, woke }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。`woke: true` 表示这次调用走了**冷路径**（目标原本没装进本进程，是这次调用把它从磁盘装载起来的）。 |
+| `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive, woke }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。`woke: true` 表示这次调用走了**冷路径**（目标原本没装进本进程，是这次调用把它从磁盘装载起来的）。到达对端的消息带两行头：`Agent <短名> sent a message:` + （发送方有标题时）`来自「<标题>」(<短名>)`，见下文「消息头的形状」。 |
 | `rename_session({ agent, title })` | 给另一个 top-level 会话改标题。新标题是**用户来源**的：它会**钉住**该会话，之后的自动标题生成不再覆盖它。**改标题需要已装载的会话**：冷会话先用 `send_session_message` 按完整 id 唤醒，再改。空标题/多行标题拒绝；超长由 session-title 服务的 `maxTitleBytes` 拒绝。自己不能给自己改（那会让「改别人的标题」变成自述）。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并让它进入某个工作区，因此侧栏可见、用户能点进去。返回 `{ sessionId, workspaceId, workspaceTitle, workspacePath, workspaceCreated, prompt }`。 |
@@ -68,6 +68,36 @@ producer 标签是 `event-projection.ts` 的 `contextProducer` 直接取 `source
 
 0.9.0 用私有 kind 换「可在日志里一眼认出是本插件发的」——代价是契约违约，而「可辨认」本来由 `form`/sender
 字段就提供了。`senderSessionId` 仍由插件从 `exec.agent.id` 写入，模型伪造不了它。
+
+### 消息头的形状：第一行给宿主解析，第二行给人认人（0.9.2）
+
+0.9.1 及以前，收件方只看到 `Agent bd1c8365 sent a message:` —— 一串 id 后缀。两个标题都叫「统筹」的会话并存时，
+id 是唯一可辨的东西，但它对人不可读。0.9.2 起，**发送方有标题时**多一行：
+
+```
+Agent bd1c8365 sent a message:
+来自「统筹」(bd1c8365)
+<正文，逐字原样跟在后面>
+```
+
+没有标题时**与 0.9.1 逐字一致**，不出现第二行：`Agent bd1c8365 sent a message:` + 正文。
+
+**为什么标题不写进第一行**（`Agent 「统筹」(bd1c8365) sent a message:`）—— 宿主会解析第一行：
+
+- `dsh-experimental-client-ui-stats/src/client/stats-fold.ts`：`const AGENT_MESSAGE_PREFIX = /^Agent (\S+) sent a message:/u`，
+  `triggerSenderOf()` 拿它的捕获组当发送者徽标；捕获到的是**原始 uuid** 时返回 `null`（不显示 id）。
+- 同一包 `src/client/StatsTable.tsx`：`const AGENT_FRAME = /^Agent \S+ sent a message:/u` 与
+  `.replace(/^Agent \S+ sent a message:\s*/u, '')`，用于折叠/剥掉这段前缀。
+
+`\S+` 意味着**标题里只要有一个空格就不匹配**——而标题里带空格是常态（`统筹 lead`、`mailbox 0.9.2`）。
+标点（`「」()`）本身不成问题，空格不行；硬塞进第一行的后果是徽标消失、前缀剥不掉。所以标题走第二行：
+第一行与 0.9.1 逐字节相同，宿主的两条正则对任何标题都照旧命中。
+
+**标题取的是发送方自己的标题**，来自 `rows()` 里发送方那一行（`titleOf` → `sessionTitle` 的折叠值），不为它多扫一次会话表。
+标题会先被清理再出现：控制字符与换行变空格、连续空白合并、首尾去空；超过 40 个**码点**截断并加 `…`
+（按码点而非 UTF-16 码元切，避免把代理对切成半个 emoji）。正文不做任何处理。
+
+**标题不进 `source`**：`agent-message` 是宿主的严格三键，多一个键就抛 `SessionFormatError`（见上一节）。
 
 ### 不要为了「显眼」把 form 改成 `notice`
 
@@ -147,6 +177,8 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 - 别名只在本进程当前存活集合内唯一，且随集合变化可能改变长度。
 - **标题不是稳定地址**：由 LLM 自动生成、会随新消息重新生成，也可能两个分支同名。所以标题只用于
   「用户说的是哪个」的解析，命中多个一律拒绝；要长期引用请用 `id`。
+- **消息头里的标题是发送那一刻的快照**（0.9.2）：发送方之后再改标题，不会改写已经投递出去的消息；超过 40 码点的标题
+  被截断成 `…`。要「跨消息稳定」的身份仍是 `id`（`source.senderSessionId` 由插件写入，模型改不了），标题只是给人看的。
 - 投递不分 workspace；但验收用的 `session_event_search` 要求对端与调用者同 `cwd`。
   （注：`session_event_search` 属于 `@deepseek-ai/dsh-tool-session-query`，用户关掉会话搜索后整个插件的
   工具会消失，调用报 `unknown tool`。`list_sessions` 不依赖它。）
@@ -163,8 +195,11 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 
 ## 测试覆盖到哪
 
-`node --test plugins/session-mailbox/test/*.test.mjs`（45 条，0.9.1 起）只覆盖 `lib/` 的纯函数与
-投递步骤 `lib/deliver.js`。`index.js` 里的编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
+`node --test plugins/session-mailbox/test/*.test.mjs`（49 条，0.9.2 起；0.9.1 是 45 条）只覆盖 `lib/` 的纯函数与
+投递步骤 `lib/deliver.js`。0.9.2 新增的四条只测纯函数：`header-titled`（有标题 → 两行头、第一行仍被宿主前缀命中、
+捕获组仍是短名）、`header-untitled`（无标题/空值 → 与 0.9.1 逐字一致，且不出现第二行）、`header-title-sanitize`
+（换行/制表符被压平、超 40 码点截断并加 `…`、不切代理对）、`header-body-verbatim`（正文逐字不动）。
+`index.js` 里「标题从发送方那一行取」这一句**没有**自动化覆盖，靠活体验收。`index.js` 里的编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
 
 - **`send_session_message` 的冷路径**：装载、准入判定顺序、统一尾部、`woke` 回执都只由活体验收覆盖。
 - **投递的真实落盘**：`lib/deliver.js` 的四个用例用的是 fake ctx（`withoutInitiator` / `sessions.flush` 都是
