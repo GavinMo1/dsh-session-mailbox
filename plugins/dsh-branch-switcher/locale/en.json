@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Session branch switcher",
-    "description": "A branch control appears in the session header: it expands the whole fork family of the current session as a small tree, and one click switches to any of them without going back to the sidebar."
-  }
-}
