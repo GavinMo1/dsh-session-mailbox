@@ -1,0 +1,7 @@
+# One Host row mounts the bundle; the browser half is discovered through the
+# package's `dsh.client` manifest and served by the Client module registry.
+# The history surface is purely Client-side (InputState + localStorage), so the
+# Host half is intentionally empty.
+- insert:
+    - id: input-history
+      name: 'dsh-input-history'

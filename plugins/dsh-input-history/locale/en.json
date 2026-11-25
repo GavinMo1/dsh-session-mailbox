@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Input history",
+    "description": "Per-session composer history: open the clock button in the tool row to browse earlier prompts and fill one back in, or press ArrowUp on an empty draft to recall the latest."
+  }
+}
