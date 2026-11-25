@@ -3,3 +3,6 @@ backups/
 *.log
 .DS_Store
 Thumbs.db
+# Scraped-out DSH product sources (from app.asar) live in the repo root while
+# reading host internals. They are third-party code: they must never be committed.
+.tmp-*
