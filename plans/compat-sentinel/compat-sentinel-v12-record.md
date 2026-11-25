@@ -68,3 +68,40 @@
 **证据强度**：v12 的正文改动没有第二条独立证据链，按用户裁决（F7）与 O-「v11 未开 round」同级处理——**执行期变异取证**。作者侧已做的一件事是「把 v12 的表从冻结文本里取出、在真机 `app.asar` 上重跑」→ `OK: 64 rows validate`（81 组 site、18 条 `region`）；它证明的是「表能跑」，不是「表没洞」。
 
 **BS-15 的四处成员集合缺口维持披露，不进正文**（`ValueSchemaAnnotations.description`、`Session.header`、`SessionCreateValue.sessionId`、`PromptContentPart` 变体）：它们与今天这批「锚点缺失」不是同一类，变异语料抓不到，等真撞上再说。
+
+## 执行记录 · 2026-11-25（执行方回填，v12 落地）
+
+`scripts/compat-check.mjs` 已按 §4 S1–S4 落地；断言表从冻结正文逐字切出（未改 pattern 一字），`AGENTS.md` 按 §4 S5 加了一行路标。
+
+### 方案缺陷（v12 正文，执行期发现，已按 Decision 6 修正）
+
+- **A64 的 `region` 切太窄，把它自己的一条 pattern 排除在窗外。** v12 为 R9A-02 给 A64 加 `region: ['export type ApiSessionAgentError =', '\n\n']`。在本机安装（`dsh-desktop-next 2.0.24-next`）上该窗口只有 **137 字节**——止锚 `\n\n` 落在那一行类型别名之后，窗口只含别名本身；而第 5 条 pattern `\{ reason: 'use subagent delivery` 位于同一文件的 `apiSessionSubagentOwnershipError`（`agent.ts:111`），永不在窗内 → 该行在基线恒红（`63 PASS / 1 FAIL`，`exit 1`）。
+- **放宽窗口修不了**：别名与那个函数之间还夹着三个声明头（`ApiSessionAgentResult`、`hasApiSessionSubagentOwner`、`apiSessionSubagentOwnershipError`），任何放宽都会命中 §4 S2 规则 3b（`块尾之后还有声明头`）。
+- **采用的修法**：删掉该行的 `region`，回到**整条目匹配**；5 条 pattern 一字未改（Decision 6：错的是锚，不是接口）。修后基线 `64 PASS / 0 FAIL / 0 STALE`，`exit 0`。
+- **「断言写错」而非「接口变了」的判据**：四组错误码仍在 `agent.ts:86` 的 `RemoteError<'session/not-found' | …>` 联合里，`{ reason: 'use subagent delivery for this child session' }` 仍在文件里；`plugins/session-mailbox/lib/pure.js:69 wakeFailureVerdict` 读的是运行时 `error.code` 与 `details.reason`，两处都没变 → 插件依赖未破，属假红。
+- **R9A-02 的结论需要改写**：那条把「四码与 `reason:` 都落在联合里」当作已解决——在本机构建上类型已重排成 `RemoteError<码联合>`，`reason:` 字面量搬进了构造函数，**window 方案对这类重排不成立**。
+- 附：本记录第 58/68 行写的「18 条 `region`」与冻结正文实测不符——v12 正文共 **20** 条 `region`；删掉 A64 那条后为 **19** 条。
+
+### 基线绝对值（2026-11-25 实机快照，供下次升级对照）
+
+| 项 | 值 |
+|---|---|
+| HEAD | `d692ac3fadc1ff857025d10183323fd8c5409382` |
+| dsh 版本（asar 根 `package.json`） | `dsh-desktop-next 2.0.24-next` |
+| asar 路径 | `C:\Users\ruike\AppData\Local\Programs\DSH NEXT\resources\app.asar`（273,991,626 B，mtime 2026-11-19 01:47:40） |
+| asar sha256 | `3BCCF05A97AEB6BED3C3CC7EBE958533C0E6E4AFA6C902D274776B572411AEFA` |
+| 64 条断言命中 | 修 A64 前 `63 PASS / 1 FAIL / 0 STALE`；修后 `64 PASS / 0 FAIL / 0 STALE` |
+| `sites` 组数 | 81 |
+| 带 `region` 的行 | 20（修 A64 后 19） |
+| node / 插件版本 / 测试 | `v24.21.0`；`plugins/session-mailbox` `0.9.0`；`node --test` → `ℹ tests 40`；`found.reason ===` 计数 `7` |
+
+### 变异语料执行结果（`mutation-corpus.md` 49 条 → 55 次运行，修 A64 后重跑）
+
+跑法 **A**（把表内 32 个条目取到 `%TEMP%` 的副本树，逐条改动后重打成临时 asar，再 `--asar` 指向它）；未改动的 fixture 与真机同结论（`63/1` → 修后 `64/0`），确认夹具忠实。
+
+- **按预期 49 / 不符 6**。预期红 39 次：38 次真红 + 1 次仍绿（#39）。预期绿 16 次：10 次真绿 + 6 次变红（#41、#42、#44×3，#35 在修 A64 后已回到预期绿）。
+- **#39（A38，`&` 续行）是真漏抓**：A38 的右边界前瞻在冻结表里是 `(?!\s*\|)`，只有 `|`，没有 `&`（同一张表的 A41/A58/A62/A63 写的是 `[|&]`）。`readonly status: AgentStatus` 后接一行 `& SessionActivityKind` 时 A38 仍绿。**待作者裁决**：是否把这类行的前瞻统一成 `[|&]`（会改变匹配面，执行方未动）。
+- **#41/#42（`description:` 折行、`SUBAGENT_DELEGATION: 120` 去尾逗号）**：语料标 GREEN，实测 FAIL——与 §8 **BS-9** 的正文（「pattern 内部折行」「尾逗号被格式化器去掉」会假红）一致。语料标签与 BS-9 冲突，实测支持 BS-9。
+- **#44.1–#44.3（文档注释里复制一份起锚，A05/A38/A49）**：标 GREEN，实测 FAIL——起锚命中 2 次 → `region-mismatch`，这是 §4 S2 规则 1 的设计行为；即语料自己注的「假红方向」。另：语料引用的 **BS-18 在本正文 §8 里不存在**（§8 只到 BS-16，BS-18 只出现在本记录 R9A-16）。
+- 其余 49 次按预期；BS-12（#31）、BS-14（#36）、BS-15 五处（#45–#49）、BS-17（#35）在修 A64 后全部保持绿，可逐条对上。
+

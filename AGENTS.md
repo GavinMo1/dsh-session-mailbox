@@ -37,6 +37,8 @@ node --test plugins/<name>/test/*.test.mjs   # 每个 CASE 都要有 console.log
 node --check plugins/<name>/index.js
 ```
 
+升级 DSH 或 pull 本仓库后：node scripts/compat-check.mjs（读 app.asar 断言宿主接口；非 0 退出＝先别升级，见 FAIL 行指到的插件位置）。
+
 测试目录名不统一，按插件实际目录跑：`session-mailbox` 是 `test/`（单数），`user-model` 是 `tests/`（复数）。
 
 活体验证（不重启）：`plugin_manager` `set_plugin`，`target` 填 `entryId`
