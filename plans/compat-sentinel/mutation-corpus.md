@@ -76,6 +76,27 @@
 | 48 | `SessionCreateValue.sessionId` 改名 | A07 | **GREEN（已披露 BS-15）** |
 | 49 | controller 的 `PromptContentPart` text 变体 `text` → `value` | A41 | **GREEN（已披露 BS-15）** |
 
+## 四、session-mailbox 0.9.1 的 A46 三键化（1 条，实跑过）
+
+A46 从「只断言 `form: 'relay'`」升级成「断言 `AgentMessageSource` 的完整三键」：entry 由
+`dsh-llm/src/message.ts` 换到 `dsh-subagent/src/continuation-messages.ts`，`region` 锁
+`export interface AgentMessageSource {` 到块尾，三条 pattern 分别是 `kind: 'agent-message'`、
+`form: 'relay'`、`senderSessionId: SessionId`；sites 同步列出 `lib/pure.js` 里的三处用法。
+
+| # | 改动 | 目标行 | expect |
+|---|---|---|---|
+| 50 | `plugins/session-mailbox/lib/pure.js` 的 `messageSource` 把 `kind` 改回 `'session-mailbox'`（**插件侧**，不是宿主源码；不需要重打 asar） | A46 | **FAIL（已实跑：A46 变红为 `STALE` — `site plugins/session-mailbox/lib/pure.js /kind: 'agent-message'/ 匹配不到`，`compat: 63 PASS / 0 FAIL / 1 STALE`，exit 1）** |
+
+两条记法上的边界，改这张表时要一并知道：
+
+- **这条走的是 `sites` 方向**（插件漂移 → STALE），不是 patterns 方向。patterns 方向（宿主把 `kind` /
+  `form` / `senderSessionId` 改名）本轮**没有**实跑：那要把改动后的宿主源码重新打进临时 asar，属 §一 那类
+  语料，留到下一次执行。
+- **BS-6 的教训要用上**：site 的 `kind: 'agent-message'` 是**文本匹配**，注释里写一份同样的字面量就能让它常绿。
+  0.9.1 的 `lib/pure.js` 为此把 doc comment 里的三键字面量拆成散文（「the kind `agent-message`, the form
+  `relay`, and the sender's session id」），全仓只有 `return { … }` 那一行能命中 site。以后改这段注释不要
+  把三键写法贴回去。
+
 ## 记法
 
 - **FAIL** = 断言必须变红；不变红就是「漏抓 → 按 Decision 6 停，不要为了变绿改断言，也不要新开版本号」。
