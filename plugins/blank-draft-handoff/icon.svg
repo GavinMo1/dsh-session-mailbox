@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Blank draft handoff">
+  <rect x="6" y="10" width="30" height="38" rx="5" fill="none" stroke="#c96442" stroke-width="3.5" opacity="0.55"/>
+  <path d="M13 20h16M13 28h12M13 36h9" stroke="#c96442" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <rect x="26" y="18" width="32" height="38" rx="5" fill="#c96442"/>
+  <path d="M33 30h18M33 38h13" stroke="#1f1e1b" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M33 46h8" stroke="#1f1e1b" stroke-width="3.5" stroke-linecap="round" opacity="0.6"/>
+</svg>
