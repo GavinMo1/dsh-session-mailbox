@@ -10,6 +10,8 @@ import {
   resolveTarget,
   messageText,
   messageSource,
+  wakeFailureVerdict,
+  coldAdmission,
 } from '../lib/pure.js'
 
 // 44 characters, last 8 all distinct
@@ -165,4 +167,61 @@ test('validate-title', () => {
   // The length cap belongs to the session-title service (maxTitleBytes), not here:
   // this only refuses what no service could accept.
   assert.strictEqual(validateTitle('长'.repeat(200)), undefined)
+})
+
+// ---- cold-session wake (mailbox-wake) -------------------------------------
+
+test('wake-verdict-not-found', () => {
+  console.log('CASE wake-verdict-not-found')
+  const verdict = wakeFailureVerdict({ code: 'session/not-found', message: 'session "x" not found', details: { sessionId: 'x' } })
+  assert.strictEqual(verdict.ok, false)
+  assert.strictEqual(verdict.reason, 'not-found')
+  assert.strictEqual(verdict.detail, 'session "x" not found')
+})
+
+test('wake-verdict-subagent', () => {
+  console.log('CASE wake-verdict-subagent')
+  const owned = wakeFailureVerdict({ code: 'session/agent-busy', message: 'owned', details: { reason: 'use subagent delivery for this child session' } })
+  assert.strictEqual(owned.reason, 'subagent')
+  // agent-busy also covers prompt/continuation failures: only the subagent reason counts.
+  const other = wakeFailureVerdict({ code: 'session/agent-busy', message: 'prompt rejected', details: { reason: 'NO_CONTINUABLE_FAILURE_OR_PENDING_INPUT' } })
+  assert.strictEqual(other.reason, 'internal')
+})
+
+test('wake-verdict-writer-held', () => {
+  console.log('CASE wake-verdict-writer-held')
+  const verdict = wakeFailureVerdict({ code: 'session/writer-held', message: 'held', details: { sessionId: 'x' } })
+  assert.strictEqual(verdict.reason, 'writer-held')
+})
+
+test('wake-verdict-internal', () => {
+  console.log('CASE wake-verdict-internal')
+  assert.strictEqual(wakeFailureVerdict(undefined).reason, 'internal')
+  assert.strictEqual(wakeFailureVerdict(null).reason, 'internal')
+  assert.strictEqual(wakeFailureVerdict({ message: 'no code' }).reason, 'internal')
+  assert.strictEqual(wakeFailureVerdict({ code: 'gateway/internal', message: 'resume failed' }).reason, 'internal')
+})
+
+test('cold-admission-order', () => {
+  console.log('CASE cold-admission-order')
+  // Six values only; allow === undefined means allow-all, exactly as decideDelivery.
+  assert.strictEqual(coldAdmission({ allow: undefined, archived: [], id: 'session-a' }), 'ok')
+  assert.strictEqual(coldAdmission({ allow: 'session-a', archived: [], id: 'session-a' }), 'allow-unreadable')
+  assert.strictEqual(coldAdmission({ allow: [], archived: [], id: 'session-a' }), 'denied-all')
+  assert.strictEqual(coldAdmission({ allow: ['session-b'], archived: [], id: 'session-a' }), 'denied')
+  // The allow list is decided before the archived set.
+  assert.strictEqual(coldAdmission({ allow: ['session-b'], archived: ['session-a'], id: 'session-a' }), 'denied')
+  assert.strictEqual(coldAdmission({ allow: undefined, archived: undefined, id: 'session-a' }), 'archived-unreadable')
+  assert.strictEqual(coldAdmission({ allow: undefined, archived: ['session-a'], id: 'session-a' }), 'archived')
+  assert.strictEqual(coldAdmission({ allow: ['session-a'], archived: ['session-b'], id: 'session-a' }), 'ok')
+  const allowed = new Set(['allow-unreadable', 'denied-all', 'denied', 'archived-unreadable', 'archived', 'ok'])
+  const every = [
+    coldAdmission({ allow: undefined, archived: [], id: 'a' }),
+    coldAdmission({ allow: 'x', archived: [], id: 'a' }),
+    coldAdmission({ allow: [], archived: [], id: 'a' }),
+    coldAdmission({ allow: ['b'], archived: [], id: 'a' }),
+    coldAdmission({ allow: undefined, archived: undefined, id: 'a' }),
+    coldAdmission({ allow: undefined, archived: ['a'], id: 'a' }),
+  ]
+  for (const value of every) assert.ok(allowed.has(value), `unexpected verdict ${value}`)
 })
