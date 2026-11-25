@@ -171,14 +171,20 @@ export function messageText(senderName, text) {
 /**
  * Message provenance. Text and identity only — no policy, no credentials.
  *
- * `relay` is the form DSH defines for exactly this: `AgentMessageSource` in
- * dsh-subagent is documented as "a message another agent addressed to this one
- * (`relay` context form)". Do not switch this to `notice` to buy a collapsed-row
- * summary: `notice` means the runtime stating what became of a child, and it
- * would also cost RelayBody's "from session <id>" line. The row being easy to
- * miss is a property of how Chat projects every non-`user` source, not of this
- * form — see the README before "fixing" it.
+ * The keys are the host's, not ours. `AgentMessageSource` in dsh-subagent
+ * (continuation-messages.ts) declares the kind `agent-message`, the form
+ * `relay`, and the sender's session id — nothing else — for "a message another
+ * agent addressed to this one". The host's session-format check (`assertSource`)
+ * whitelists that kind and then validates the source against exactly those three
+ * keys: an extra key or a missing one throws. A private kind such as
+ * `session-mailbox` is not on the fifteen-kind whitelist at all, so such an
+ * event cannot be migrated to a new session format.
+ *
+ * `relay` is also the form to keep: `notice` means the runtime stating what
+ * became of a child, and it would also cost RelayBody's "from session <id>"
+ * line. The row being easy to miss is a property of how Chat projects every
+ * non-`user` source, not of this form — see the README before "fixing" it.
  */
 export function messageSource(senderId) {
-  return { kind: 'session-mailbox', form: 'relay', senderSessionId: String(senderId) }
+  return { kind: 'agent-message', form: 'relay', senderSessionId: String(senderId) }
 }

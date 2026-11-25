@@ -24,6 +24,11 @@
 
 **`queued` 只表示「已进收件箱」，不表示对方读到了。** 要确认到达，请让对方回信。
 
+投递本身（0.9.1 起）走两步，都在返回之前完成：先 `ctx.agents.withoutInitiator(...)` 把这条消息塞进目标收件箱
+——目标因此**不会**被记成「发送方这一轮发起的工作」（与 Web UI 发 prompt 同一归因）；再 `await
+ctx.sessions.flush(target.session)` 把它**写进持久转录**，所以在目标下一次写入之前重启也丢不了。两步都失败
+不致命：`flush` 抛错或该服务未挂载时消息已进收件箱，调用仍报 `queued`（不会假装「没送到」）。
+
 ### `rename_session` 的语义
 
 - **用户来源的标题会钉住会话**：`dsh-session-title` 的三个来源里，显式重命名优先级最高，且会阻止后续自动修订。所以改一次就固定，不会被模型再改回去。
@@ -43,11 +48,26 @@
 
 不是用户气泡。Chat 端的分类在 `dsh-client-ui-chat` 的 `conversation-nodes/message.ts` 里只有一句判据：
 `if (event.data.source.kind !== 'user')` —— **只要 source 不是 `user`，这条 `user/message` 就变成 `kind: 'context'`
-节点**，渲染成一行折叠的「上下文注入 · `session-mailbox`」，点开才看到「来自会话 &lt;id&gt;」和正文。
+节点**，渲染成一行折叠的「上下文注入 · `agent-message`」，点开才看到「来自会话 &lt;id&gt;」和正文。行尾那个
+producer 标签是 `event-projection.ts` 的 `contextProducer` 直接取 `source.kind`（`agent-message` 没有专门分支，
+走 default），所以它显示的是宿主的 kind 名，不是本插件的名字。
 
 这是 Chat 对所有非用户来源的统一处理，和本插件选了哪个 form 无关。**唯一的例外**是：如果这条消息是
 **唤醒**一个空闲会话的（而不是插进正在跑的 turn），它会被投影成 `turn-trigger` 节点、走 `TurnTriggerNodeView`，
 那是开启新 turn 的醒目行。
+
+### source 用宿主的三键形状，不要自造 kind（0.9.1 修正）
+
+`messageSource()` 返回 `{ kind: 'agent-message', form: 'relay', senderSessionId }`，**三键一个不多一个不少**：
+
+- 宿主 `AgentMessageSource`（`dsh-subagent/src/continuation-messages.ts`）为「一个 agent 发给另一个 agent 的
+  消息」定义的就是这三个字段；
+- 宿主的会话格式校验 `assertSource()` 有一份 15 个 kind 的白名单，`agent-message` 在表里、**随后按上面三个键
+  做严格校验**，多一键少一键都抛 `SessionFormatError`；不在表里的 kind（0.9.0 及以前用的 `session-mailbox`）
+  会在迁移时报 `cannot safely transform unclassified message source`。
+
+0.9.0 用私有 kind 换「可在日志里一眼认出是本插件发的」——代价是契约违约，而「可辨认」本来由 `form`/sender
+字段就提供了。`senderSessionId` 仍由插件从 `exec.agent.id` 写入，模型伪造不了它。
 
 ### 不要为了「显眼」把 form 改成 `notice`
 
@@ -114,7 +134,7 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 ## 卸载时不会消失的四条事实
 
 1. 卸载不修改既有转录：旧会话里仍然写着 `Use send_session_message(...)`，而工具已经不存在。
-2. `source.kind === 'session-mailbox'` 的事件不进 `session export`（导出只取 `kind === 'user'`）。
+2. `source.kind === 'agent-message'` 的事件不进 `session export`（导出只取 `kind === 'user'`）。改过版：0.9.0 及以前写的是 `'session-mailbox'`。
 3. 系统提示词段是每个会话的持久快照，装了就在该会话里留一份，卸载也清不掉。
 4. 0.9.0 之前启动的会话保留**旧**提示词快照，不会主动知道「传完整 id 可以装载冷会话」；工具描述是全量的，所以它们仍能在被旧错误打回后读到新能力。
 
@@ -143,10 +163,12 @@ profile `package.json` 里加依赖与 bundle 条目，然后 `pnpm --dir <profi
 
 ## 测试覆盖到哪
 
-`node --test plugins/session-mailbox/test/*.test.mjs`（40 条）只覆盖 `lib/` 的纯函数。`index.js` 里的
-编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
+`node --test plugins/session-mailbox/test/*.test.mjs`（45 条，0.9.1 起）只覆盖 `lib/` 的纯函数与
+投递步骤 `lib/deliver.js`。`index.js` 里的编排靠活体验收，下面这几处**没有自动化覆盖**，改动那里要手动验：
 
 - **`send_session_message` 的冷路径**：装载、准入判定顺序、统一尾部、`woke` 回执都只由活体验收覆盖。
+- **投递的真实落盘**：`lib/deliver.js` 的四个用例用的是 fake ctx（`withoutInitiator` / `sessions.flush` 都是
+  spy），只证明「包一层、调一次、await 一次」的顺序与容错，不证明真机上 flush 写到了哪。
 
 - **`subagents.rootOf` 抛错的两条路径**：普通子代理的 header 就带 `origin: 'subagent'`，会先在 header
   判定命中，所以真实的 `SubagentError` 分支从未被端到端触发过。`subagentVerdict` 的单测覆盖了

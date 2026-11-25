@@ -4,6 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import * as pure from './lib/pure.js'
 import * as createLib from './lib/create.js'
+import { deliverUnattributed } from './lib/deliver.js'
 
 export const name = 'session-mailbox'
 // Neither `subagents` nor `sessionController` is injected on purpose: a missing
@@ -300,8 +301,13 @@ export function apply(ctx, config = {}) {
         content: [{ type: 'text', text: pure.messageText(senderName, args.message) }],
         source: pure.messageSource(exec.agent.id),
       })
-      if (primitive === 'followup') target.followup(message)
-      else target.steer(message)
+      // Queue it unattributed, then put it on disk: withoutInitiator keeps the
+      // target from being recorded as work started by the sender's turn, and the
+      // flush is what makes the message survive a restart before its next write.
+      await deliverUnattributed(ctx, target, () => {
+        if (primitive === 'followup') target.followup(message)
+        else target.steer(message)
+      })
 
       return {
         queued: true,
