@@ -113,6 +113,9 @@ function scanEntries(dir, opts = {}) {
       skipped.push(name)
       continue
     }
+    // A staged entry is carried in the same list as an approved one, flagged, so
+    // a reader can tell what is not published yet without a second tool call.
+    if (opts.pending === true) read.entry.pending = true
     entries.push(read.entry)
   }
   entries.sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
@@ -223,11 +226,23 @@ export function search(root, keywords) {
   const tokens = um.tokenize(keywords.join(' '))
   if (tokens.length === 0) return { ok: false, error: 'error: no keywords' }
 
-  const scanned = scanEntries(entriesDir(root))
+  const approved = scanEntries(entriesDir(root))
+  const pending = scanEntries(pendingDir(root), { pending: true })
   const library = libraryVerdict(root)
-  const staged = stagedIds(root).length
-  const skipped = scanned.ok === true ? scanned.skipped.slice() : [ENTRIES]
-  const entries = scanned.ok === true ? scanned.entries : []
+  // Counted from the parsed entries, not from the file listing: a staged entry
+  // that cannot be read is reported under "# skipped:" instead of being counted
+  // as a staged memory the reader can rely on.
+  const staged = pending.ok === true ? pending.entries.length : stagedIds(root).length
+  const skipped = []
+  for (const part of [approved, pending]) {
+    if (part.ok !== true) skipped.push(String(part.error).replace(/^unreadable: /, '') + '/')
+    else skipped.push(...part.skipped)
+  }
+  // Staged entries are searchable on purpose: `append` stages without pushing,
+  // so a search that only saw entries/ would let the same fact be recorded twice.
+  const entries = []
+  if (approved.ok === true) entries.push(...approved.entries)
+  if (pending.ok === true) entries.push(...pending.entries)
 
   const ranked = um.rank(entries, tokens)
   const rows = ranked.slice(0, um.MAX_RESULTS).map((row) => row.entry)
@@ -345,13 +360,20 @@ function patchApproval(text, approvedBy, approvedOn) {
   return lines.join('\n')
 }
 
-export function approve(root, id, approvedBy) {
-  const by = String(approvedBy ?? '').trim()
+// approved-by is written straight into a single front-matter line: a newline
+// would split the front matter and leave an unparseable entry behind a success
+// message. Validated once, for both the single-entry and the batch path.
+function approvalBy(value) {
+  const by = String(value ?? '').trim()
   if (by === '') return { ok: false, error: 'error: approved-by is required' }
-  // approved-by is written straight into a single front-matter line: a newline
-  // would split the front matter and leave an unparseable entry behind a
-  // success message.
   if (/[\r\n]/.test(by)) return { ok: false, error: 'error: bad approved-by: contains a newline' }
+  return { ok: true, by }
+}
+
+// Land one staged entry into entries/: approval stamped, every other byte carried
+// over, the .pending copy removed. No git here on purpose — `flush` lands a whole
+// batch and only then commits and pushes once.
+function landPending(root, id, by) {
   const key = String(id ?? '')
   if (!ID_RE.test(key)) return { ok: false, error: 'error: unknown pending: ' + key }
 
@@ -379,12 +401,69 @@ export function approve(root, id, approvedBy) {
   const reverdict = um.validateEntry(reread.entry, {})
   if (reverdict.ok !== true) return { ok: false, error: 'error: bad pending: ' + reverdict.detail }
   tryUnlink(pendingPath)
+  return { ok: true, id: key }
+}
+
+// Single-entry path: land, commit that one entry, push. Kept for a caller that
+// really does want one entry published now; the batch path is `flush`.
+export function approve(root, id, approvedBy) {
+  const check = approvalBy(approvedBy)
+  if (check.ok !== true) return check
+  const landed = landPending(root, id, check.by)
+  if (landed.ok !== true) return landed
 
   // The entry is on disk and readable at this point. A git failure must not
   // undo that: it is reported, and `sync` retries the commit later.
-  const committed = commitAndPush(root, [relOf(key)], 'entry: ' + key)
+  const committed = commitAndPush(root, [relOf(landed.id)], 'entry: ' + landed.id)
   if (committed.ok !== true) return committed
-  return { ok: true, id: key, lines: ['approved: ' + key] }
+  return { ok: true, id: landed.id, lines: ['approved: ' + landed.id] }
+}
+
+// ---- flush --------------------------------------------------------------
+
+// Approve every staged entry, then commit the batch together and push once. This
+// is what `append` used to do per entry: the push is a network round trip and a
+// remote commit per recorded fact, which is noise for a library that grows a few
+// entries a day. `append` now only stages; `flush` publishes a batch.
+export function flush(root, approvedBy) {
+  const check = approvalBy(approvedBy)
+  if (check.ok !== true) return check
+
+  const ids = stagedIds(root)
+  if (ids.length === 0) return { ok: true, lines: ['nothing staged'], landed: [], failed: [] }
+
+  const landed = []
+  const failed = []
+  for (const id of ids) {
+    const result = landPending(root, id, check.by)
+    if (result.ok === true) landed.push(id)
+    else failed.push(id + ': ' + String(result.error ?? 'unknown').replace(/^error: /, ''))
+  }
+
+  // One commit for the whole batch, then one push. Landing already succeeded, so
+  // a git failure never loses an entry: it is reported and `sync` finishes it.
+  if (landed.length > 0) {
+    const committed = commitPaths(root, landed.map((id) => relOf(id)), 'entries: ' + landed.join(' '))
+    if (committed.ok !== true) {
+      return { ok: false, error: committed.error + ' (landed ' + landed.length + ', run `um sync` to finish)', landed, failed }
+    }
+    const pushed = git(root, ['push'])
+    if (pushed.ok !== true) {
+      return { ok: false, error: 'error: push failed: ' + pushed.reason + ' (landed ' + landed.length + ', run `um sync` to push)', landed, failed }
+    }
+  }
+
+  const lines = ['flushed: ' + landed.length + (landed.length === 0 ? '' : ' (' + landed.join(', ') + ')')]
+  for (const line of failed) lines.push('left staged: ' + line)
+  if (failed.length > 0) {
+    return {
+      ok: false,
+      error: 'error: ' + lines.join('; ') + ' (fix the cause, then `um flush` again)',
+      landed,
+      failed,
+    }
+  }
+  return { ok: true, lines, landed, failed }
 }
 
 // ---- edit ---------------------------------------------------------------

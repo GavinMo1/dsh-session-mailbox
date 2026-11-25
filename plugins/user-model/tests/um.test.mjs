@@ -377,6 +377,98 @@ test('CASE list-splits-the-three-states', () => {
   }
 })
 
+// ---- stage now, publish as a batch ---------------------------------------
+
+const gitOut = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const commitCount = (cwd) => Number(gitOut(cwd, ['rev-list', '--count', 'HEAD']))
+
+// The point of the split: appending must not create a commit, must not push, and
+// must leave the entry in .pending/ — the push happens once, in flush.
+test('CASE append-stages-without-committing', () => {
+  const { base, root } = mkRepo()
+  try {
+    const before = commitCount(root)
+    const staged = store.append(root, { slug: 'quiet', kind: 'fact', title: '安静的', body: '正文', date: '2026-11-24' })
+    assert.equal(staged.ok, true)
+    assert.equal(store.stagedIds(root).length, 1)
+    assert.equal(commitCount(root), before)
+    assert.equal(store.dirtyCount(root), 0)
+    assert.equal(fs.existsSync(path.join(root, 'entries', staged.id + '.md')), false)
+    // Staged, searchable, and flagged so it cannot be mistaken for published.
+    const lines = store.search(root, ['安静']).lines
+    const row = lines.find((l) => l.startsWith('2026'))
+    assert.ok(row !== undefined, lines.join('\n'))
+    assert.ok(row.endsWith(' [pending]'), row)
+    assert.ok(lines.includes('# staged: 1'), lines.join('\n'))
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('CASE flush-publishes-a-batch-in-one-commit', () => {
+  const { base, root } = mkRepo()
+  try {
+    const before = commitCount(root)
+    const ids = ['one', 'two', 'three'].map((slug) => {
+      const staged = store.append(root, { slug, kind: 'fact', title: '标题 ' + slug, body: '正文 ' + slug, date: '2026-11-24' })
+      assert.equal(staged.ok, true)
+      return staged.id
+    })
+    assert.equal(store.stagedIds(root).length, 3)
+
+    const flushed = store.flush(root, 'agent, 2026-11-25')
+    assert.equal(flushed.ok, true, flushed.error)
+    assert.deepEqual(flushed.landed.slice().sort(), ids.slice().sort())
+    assert.deepEqual(flushed.failed, [])
+
+    // One batch commit, not three, and one push for the whole batch.
+    assert.equal(commitCount(root), before + 1)
+    assert.equal(store.dirtyCount(root), 0)
+    assert.equal(store.stagedIds(root).length, 0)
+    for (const id of ids) {
+      assert.equal(fs.existsSync(path.join(root, 'entries', id + '.md')), true)
+      const shown = store.show(root, id)
+      assert.equal(shown.entry.approvedBy, 'agent, 2026-11-25')
+      assert.equal(shown.entry.approvedOn.length, 20)
+    }
+    // Published entries no longer carry the pending marker.
+    assert.equal(store.search(root, ['标题']).lines.some((l) => l.includes('[pending]')), false)
+    // The batch really is on the remote, in one commit.
+    assert.equal(Number(gitOut(root, ['rev-list', '--count', 'origin/main'])), before + 1)
+    assert.deepEqual(store.check(root), { ok: true, lines: [] })
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('CASE flush-with-nothing-staged-is-a-no-op', () => {
+  const { base, root } = mkRepo()
+  try {
+    const before = commitCount(root)
+    const flushed = store.flush(root, 'agent, 2026-11-25')
+    assert.equal(flushed.ok, true)
+    assert.deepEqual(flushed.lines, ['nothing staged'])
+    assert.equal(commitCount(root), before)
+    assert.equal(store.dirtyCount(root), 0)
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('CASE flush-rejects-bad-approved-by-and-keeps-the-batch', () => {
+  const { base, root } = mkRepo()
+  try {
+    const staged = store.append(root, { slug: 'keep', kind: 'fact', title: '留着', body: '正文', date: '2026-11-24' })
+    assert.equal(store.flush(root, '').error, 'error: approved-by is required')
+    assert.equal(store.flush(root, 'user\n2026-11-24').error, 'error: bad approved-by: contains a newline')
+    // A refused flush must not consume the batch.
+    assert.deepEqual(store.stagedIds(root), [staged.id])
+    assert.equal(store.approve(root, staged.id, 'user, 2026-11-24').ok, true)
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
 // ---- the HTTP face -------------------------------------------------------
 
 test('CASE server-reads-and-retires', async () => {

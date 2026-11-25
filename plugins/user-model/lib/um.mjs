@@ -194,9 +194,13 @@ export function rank(entries, tokens) {
     .sort((a, b) => (a.entry.date === b.entry.date ? b.score - a.score : (a.entry.date < b.entry.date ? 1 : -1)))
 }
 
+// Staged entries appear in the same list as approved ones, flagged at the end of
+// the line: `append` no longer publishes, so a search that hid them would invite
+// recording the same fact twice.
 export function dataLine(entry) {
   const body = normalizeNewlines(entry.body).split('\n').join(' ')
-  return [entry.id, entry.date, entry.kind, entry.title, body].join(' | ')
+  const line = [entry.id, entry.date, entry.kind, entry.title, body].join(' | ')
+  return entry.pending === true ? line + ' [pending]' : line
 }
 
 // `total` is the number of matching entries, not the number of rows printed:

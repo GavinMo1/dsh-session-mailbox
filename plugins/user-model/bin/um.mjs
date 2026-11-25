@@ -13,6 +13,7 @@ const USAGE = [
   '  um search <keyword...>',
   '  um append --slug <slug> --kind <fact|decision> --title <title> --body <body> [--date YYYY-MM-DD]',
   '  um approve <id> --approved-by <who, when>',
+  '  um flush --approved-by <who, when>',
   '  um edit <id> [--title <title>] [--body <body>]',
   '  um retire <id> [--reason <why>]',
   '  um restore <id>',
@@ -109,6 +110,9 @@ if (command === undefined || command === '--help' || command === '-h' || command
 } else if (command === 'approve') {
   const { flags, rest } = parseFlags(argv)
   done(store.approve(root, rest[0], flags['approved-by']))
+} else if (command === 'flush') {
+  const { flags } = parseFlags(argv)
+  done(store.flush(root, flags['approved-by']))
 } else if (command === 'edit') {
   const { flags, rest } = parseFlags(argv)
   done(store.edit(root, rest[0], { title: flags.title, body: flags.body }))

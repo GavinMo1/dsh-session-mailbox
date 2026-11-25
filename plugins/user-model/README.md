@@ -8,17 +8,20 @@ Two parts, deliberately separated:
   The path is fixed: `pluginRoot()` resolves `os.homedir()` and never reads `UM_HOME`, so to keep the repository elsewhere
   (another drive, say) the **only** supported move is to put it back at that path — a directory junction works and is what
   this machine uses (`~/.agents/user-model` → `D:\project\user-model`). Do not repoint it by editing code.
-- **this plugin** — three tools plus one prompt block. It also ships `bin/um.mjs`, the `um` CLI, and a local page (`um serve`) for the human.
+- **this plugin** — four tools plus one prompt block. It also ships `bin/um.mjs`, the `um` CLI, and a local page (`um serve`) for the human.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `user_model_search` | 1–3 content words → the newest ≤3 matching entries plus `# total:` |
-| `user_model_append` | record an entry: lands it, commits and pushes in one call |
-| `user_model_approve` | leftovers only: move a staged entry to `entries/`, stamp it, commit and push |
+| `user_model_search` | 1–3 content words → the newest ≤3 matching entries plus `# total:`; staged entries carry a trailing ` [pending]` |
+| `user_model_append` | **stage** an entry on this machine only: no commit, no push |
+| `user_model_flush` | approve everything staged, commit the batch once, push once |
+| `user_model_approve` | one-off: publish a single staged entry on its own |
 
-`user_model_append` lands and pushes in one call, so an entry the agent records is searchable immediately — there is no chat-side approval step. The user reviews, edits and retires entries on the local page (`um serve`). The staging area still exists for the CLI (`um append` then `um approve`) and for anything a failed landing left behind.
+Recording and publishing are separate calls on purpose. `user_model_append` writes `entries/.pending/<id>.md` and stops there; `user_model_flush` moves every staged entry into `entries/`, stamps the approval, makes **one** commit for the batch and **one** push. A burst of three entries therefore costs one network round trip instead of three, which is what the library wants when it grows a few entries a day.
+
+A staged entry is already visible to `user_model_search` (flagged ` [pending]`) — otherwise a second call could not tell "already recorded, not published yet" from "not recorded", and the same fact would be appended twice. The user reviews, edits and retires entries on the local page (`um serve`); no chat-side approval step is involved.
 
 ## CLI
 
@@ -28,6 +31,7 @@ node <plugin>/bin/um.mjs show <id>
 node <plugin>/bin/um.mjs search 提交 中文
 node <plugin>/bin/um.mjs append --slug commit-lang --kind decision --title 提交信息用中文 --body 团队都用中文
 node <plugin>/bin/um.mjs approve 20261124-commit-lang --approved-by "user, 2026-11-24"
+node <plugin>/bin/um.mjs flush --approved-by "agent, 2026-11-25"
 node <plugin>/bin/um.mjs edit 20261124-commit-lang --title 新标题 --body 新正文
 node <plugin>/bin/um.mjs retire 20261124-commit-lang --reason 记错了
 node <plugin>/bin/um.mjs restore 20261124-commit-lang
@@ -109,18 +113,20 @@ git clone https://github.com/GavinMo1/user-model.git "$env:USERPROFILE\.agents\u
 # library: ok | missing     ← the library root exists vs has never been cloned here
 # root: <absolute path>
 # staged: <pending count>
-<id> | <date> | <kind> | <title> | <body>
+<id> | <date> | <kind> | <title> | <body> [pending]
 # total: <matching entries, not rows printed>
 # skipped: <file name>      ← parse/validation failure; the read was incomplete
 # no match
 ```
+
+` [pending]` marks an entry that `user_model_append` staged but `user_model_flush` has not published yet. It is searchable so the same fact is not recorded twice, and it is not in git until the flush.
 
 `library` keys off the library **root**, not `entries/`. A library that has been cloned and never written to has no `entries/` directory at all — git does not track empty directories — so keying it off `entries/` used to report such a library as `missing`, i.e. with the same answer as "this machine has no library". Those are different facts and now have different answers.
 
 ## Layout
 
 ```
-index.js            three tools + prompt block
+index.js            four tools + prompt block
 lib/um.mjs          pure: tokenize, parse, validate, rank, format
 lib/store.mjs       fs + git; every function takes the library root
 lib/server.mjs      loopback HTTP face over store.mjs
