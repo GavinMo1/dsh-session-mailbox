@@ -17,7 +17,7 @@ const PROMPT = [
   'Do not record: the requirements of the task at hand, a one-off choice, a temporary constraint, a mood, or your own guess. Leaving something out costs the user one sentence later; a false entry costs the user a cleanup on the page, which is worse.',
   'user_model_append only stages the entry on this machine: it does not commit and does not push, and the entry is not published. Call user_model_flush to publish the batch — one commit and one push for everything staged, which is why you collect a few entries first instead of flushing after each one. A staged entry is already searchable and shows a trailing " [pending]" in the results, so search before you append to avoid recording the same fact twice. Flush at a natural checkpoint: three to five staged entries, the end of a working session, or when the user asks for it.',
   'Do not ask the user to approve anything, and do not wait for a second step after an append — the user reviews, edits and retires entries on the local page instead (the CLI command is `um serve`). Record at most one entry per turn, and never two about the same subject.',
-  'There is no "replaced" flag: to change an earlier decision, record a new entry; the newer date wins.',
+  'Do not leave a superseded entry lying next to the one that replaced it: two contradictory entries both read as established rules to the next reader. Use user_model_retire on the old one (the file is kept under entries/.retired/, so nothing is lost) and user_model_edit to make the surviving entry self-contained.',
   'Recording and publishing are top-level operations: user_model_append and user_model_flush refuse when the caller is a subagent. A subagent reports the fact to the session that delegated it, and that session records it.',
 ].join('\n')
 
@@ -144,6 +144,43 @@ export function apply(ctx) {
     output: textOutput,
     async execute(args) {
       const result = store.approve(root, args.id, args.approvedBy)
+      if (result.ok !== true) throw new Error(result.error)
+      return { text: result.lines.join('\n') }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'user_model_retire',
+    description: 'Retire an entry that no longer holds — typically the older half of a pair that a newer entry superseded. The file moves to entries/.retired/ (nothing is deleted: the text stays in git and `um restore` brings it back), one commit and one push happen, and search stops returning it at once. Top-level sessions only. Give the reason: it is what the user sees when reviewing removals. Prefer this over appending an "it overrides X" entry — leaving both makes two contradictory rules look equally established.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'The entry id, exactly as user_model_search printed it.' },
+      reason: { type: 'string', description: 'Why it no longer holds, e.g. "superseded by 20261125-other-entry".' },
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      if (exec.agent?.session.header.origin === 'subagent') {
+        throw new Error('user_model_retire is for top-level sessions; report the finding and let the owning session decide')
+      }
+      const result = store.retire(root, args.id, args.reason)
+      if (result.ok !== true) throw new Error(result.error)
+      return { text: result.lines.join('\n') }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'user_model_edit',
+    description: 'Rewrite the title and/or body of an existing entry in place. Its date, kind and approval survive, so an edit is not a new decision — use it to make the surviving entry self-contained after a supersede (drop "overrides X" phrasing once X is retired) or to fix a wording error. The previous text stays in git history. Top-level sessions only.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'The entry id, exactly as user_model_search printed it.' },
+      title: { type: 'string', description: 'New title: one line, at most 60 characters, no "|". Omit to keep the current one.' },
+      body: { type: 'string', description: 'New body: at most 400 characters, no "|", no line equal to ---. Omit to keep the current one.' },
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      if (exec.agent?.session.header.origin === 'subagent') {
+        throw new Error('user_model_edit is for top-level sessions; report the finding and let the owning session decide')
+      }
+      const result = store.edit(root, args.id, { title: args.title, body: args.body })
       if (result.ok !== true) throw new Error(result.error)
       return { text: result.lines.join('\n') }
     },

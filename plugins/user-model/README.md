@@ -18,6 +18,10 @@ Two parts, deliberately separated:
 | `user_model_append` | **stage** an entry on this machine only: no commit, no push. Top-level sessions only |
 | `user_model_flush` | approve everything staged, commit the batch once, push once. Top-level sessions only |
 | `user_model_approve` | one-off: publish a single staged entry on its own |
+| `user_model_retire` |  retire an entry that no longer holds (moved to `entries/.retired/`, never deleted); top-level sessions only |
+| `user_model_edit` | rewrite one entry's title/body in place, keeping its date/kind/approval; top-level sessions only |
+
+**取代旧规则时要"换掉"，不要"并列"。** 追加一条"某某覆盖某某"会留下两条互相矛盾的规则，对下一个读库的 agent 来说它们看起来同样权威。正确做法：`user_model_retire` 旧的 + `user_model_edit` 把新的写成自足的（去掉"覆盖 X"这类指代）。retire 只是把文件移到 `entries/.retired/`，`um restore` 可撤回，git 里也一直有。
 
 **写入是顶层会话的决定，不是子代理的。** `user_model_append` 与 `user_model_flush` 在调用者是子代理时**直接拒绝**（`session.header.origin === 'subagent'`）：子代理该做的是把事实回报给派它的会话，由那个会话决定记不记、什么时候发布。否则每个临时 worker 都能往同一个 `.pending` 队列里塞条目，而没人能说清一条记忆是谁写的。读取（`user_model_search`）对子代理完全开放。
 
