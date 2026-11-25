@@ -1,0 +1,7 @@
+# One Host row mounts the bundle; the browser half is discovered through the
+# package's `dsh.client` manifest and served by the Client module registry.
+# The whole capability is Client-side (one session-header entry plus one
+# stylesheet reading the existing Session list), so the Host half is empty.
+- insert:
+    - id: branch-switcher
+      name: 'dsh-branch-switcher'
