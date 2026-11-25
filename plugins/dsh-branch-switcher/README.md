@@ -55,7 +55,17 @@ node scripts/link-plugins.mjs --apply
 
 只挂了 `conversation.session.header.actions` 这一个 slot，`id: branch-switcher`、`order: 15`，和「编辑历史消息」（order 30）、任务列表（order 20）并排不冲突。
 
+## 测试
+
+```powershell
+node --test plugins/dsh-branch-switcher/test/tree.test.mjs
+```
+
+`test/tree.test.mjs` 直接加载**发布用的** `client.js`（不是副本、不打包），用桩替掉 `window.__ModuleLoader__.load` 和 `react` / `react-dom`，拿到工厂返回的插件对象后只测它导出的 `__test`（`familyOf` / `relativeTime` / `isBranchRow`）。产品代码一行没为测试改过。
+
+18 个用例：血统展开（父/兄弟/深链深度与连接线、last 兄弟、子代理排除、父会话缺失、父环、归档标记与计数、标题三级回退、字段默认值、不可用视图返回 `null`）、`isBranchRow`、时间分档（刚刚/分钟/小时/天/超过一周的绝对日期、非法时间戳、时钟倒退）。
+
 ## 已知缺口
 
-- **原来的测试丢了**。这个插件原本有自己的 `test/tree.test.mjs`：直接加载**发布用的** `client.js`（不是副本），用桩替掉 `window.__ModuleLoader__` 和 `react`，只测模块导出的 `__test` 纯函数——血统展开、深度/连接线标记、子代理排除、父会话缺失、环、归档标记与 `navigable`、标题回退、时间分档，共 15 项。
-  收进这个仓库时源码只有打包产物，`test/` 没跟着留下，所以现在这个目录里**没有测试**。`client.js` 里的 `__test` 导出还在，按上面的描述可以直接把测试补回来——这是这个插件唯一的验证手段，值得补。
+- 测试只覆盖三个纯函数。渲染、portal 定位、键盘交互、归档行不可点这些都在 `client.js` 的 React 层里，没有自动化覆盖，改那部分只能手动点。
+
