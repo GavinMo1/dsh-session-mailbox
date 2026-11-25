@@ -110,3 +110,24 @@ git checkout <commit-or-tag> -- plugins/session-mailbox
 - **锚点必须是 `ctx.get('profileContext').installAnchor`**。`process.env.DSH_INSTALL_DIR` 是每次
   工具执行注入的 shell 变量，Host 进程里**没有**它。别把它「优化」回去。
 - 插件名与 bundle 名一致（`dsh-<name>`），`dsh.profile.bundles` 里写包名。
+
+## 把某个插件发到公网（npm）
+
+现在只有 `session-mailbox` 走这条路，包名 `dsh-session-mailbox`，公网仓库 <https://github.com/GavinMo1/dsh-session-mailbox>。做法是**单向出口**：本仓库是唯一开发地，公网仓库是 `git subtree push` 出来的产物。
+
+发版四条命令（`public` remote 已配好）：
+
+```powershell
+git subtree push --prefix=plugins/session-mailbox public main
+git push public --tags
+cd plugins/session-mailbox; npm publish --registry=https://registry.npmjs.org/
+git tag dsh-session-mailbox/v<version>; git push origin --tags
+```
+
+三个非显然的坑：
+
+- **`.npmrc` 的 `registry` 是 npmmirror 镜像**，镜像不接发布，`npm publish` 必须显式带 `--registry=https://registry.npmjs.org/`；`.npmrc` 里那行 `//registry.npmjs.org/:_authToken=` 只对官方 host 生效。
+- **发布是异步的**：`npm publish` 成功退出后，registry 可能几十秒内只显示一个 `0.0.0-stage` 占位包（npm 给新包名写的 stub），`dist-tags` 也还指着它。**不要换版本号重发** —— 重新查 `dist-tags`，真发上去了再发同一个版本会得到 `E403 cannot publish over`。
+- **账户开了 `auth-and-writes`**：网页登录拿到的 session token 发不出去（回 403 而不是 EOTP），只有带 bypass 2FA 的 granular token 能用。
+
+**铁律：永远不在公网仓库里直接改代码**。下一次 `subtree push` 会覆盖它或顶成冲突；外人提的 PR 要手工 `git subtree pull` 或 cherry-pick 回来。
