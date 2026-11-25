@@ -6,7 +6,7 @@
 
 | 工具 | 作用 |
 |---|---|
-| `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；子代理内部调用返回空数组。 |
+| `list_sessions({})` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、**标题 `title`**、`running`/`inactive`、`cwd`。不列自己；**不列已归档的会话**（它们收不到消息）；**子代理调用会报错**（不是返回空数组——空数组会被误读成"这台机器上没有别的会话"）。 |
 | `send_session_message({ agent, message })` | 向 `agent` 投一条文本。返回 `{ queued, to, name, statusBefore, primitive }`；回显里写明走了 `followup` 还是 `steer`、以及调用前对端是 `running` 还是 `inactive`——这两者语义差别很大（`steer` 插进对端当前 step，`followup` 给它开新 turn），调用方否则无从判断。 |
 | `rename_session({ agent, title })` | 给另一个 top-level 会话改标题。新标题是**用户来源**的：它会**钉住**该会话，之后的自动标题生成不再覆盖它。冷会话也能改——标题是日志事件，`rename` 之前先 `resolveAgent` 把它恢复出来。空标题/多行标题拒绝；超长由 session-title 服务的 `maxTitleBytes` 拒绝。自己不能给自己改（那会让「改别人的标题」变成自述）。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> | <title> | <path> | sessions: <n>`。给 `workspace`（id 或精确标题）就在该行后追加它的 `session: <id>` 行；标题命中多个报 `ambiguous workspace`，都匹配不上报 `unknown workspace`。**不剔已归档会话**（与 `list_sessions` 的口径不同：那里剔，因为归档的收不到消息；这里报全量账目），归档的那个仍出现在行里。 |

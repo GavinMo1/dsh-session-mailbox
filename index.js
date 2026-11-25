@@ -122,8 +122,13 @@ export function apply(ctx, config = {}) {
       }],
     },
     async execute(_args, exec) {
+      // Fail loudly, not with an empty array: `[]` reads as "this machine has no
+      // other sessions", which is the wrong answer for a caller that is simply
+      // not allowed to see them. A subagent must be told what is true.
+      if (exec.agent?.session.header.origin === 'subagent') {
+        throw new Error('list_sessions is for top-level sessions; subagents see only their own subagent tree')
+      }
       const selfId = exec.agent === undefined ? undefined : String(exec.agent.id)
-      if (exec.agent?.session.header.origin === 'subagent') return []
       return liveRows()
         .filter((r) => r.id !== selfId)
         .sort((a, b) => b.createdAt - a.createdAt)
