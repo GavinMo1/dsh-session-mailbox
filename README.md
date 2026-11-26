@@ -65,7 +65,7 @@ pnpm --dir <你的 DSH profile 目录> add dsh-session-mailbox
 
 | 工具 | 一句话 |
 |---|---|
-| `list_sessions()` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、`title`、`running`/`inactive`、`cwd`；不列自己，不列已归档的会话。 |
+| `list_sessions()` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、`title`、`running`/`inactive`、`cwd`；不列自己，不列已归档的会话。**和你交换过消息的会话，行尾还会多一小段「已回信 / 未回信」**（见下）。 |
 | `send_session_message({ agent, message })` | 给另一个 top-level 会话投一条纯文本，返回 `{ queued, to, name, statusBefore, primitive, woke }`，其中 `primitive` 说明这次是插进对方当前 step（`steer`）还是给它开新 turn（`followup`）。 |
 | `rename_session({ agent, title })` | 给另一个会话换标题；新标题是「用户来源」的，会**钉住**该会话，之后的自动标题生成不再覆盖它。 |
 | `compact_session({ agent })` | 对另一个会话跑宿主自己的 `/compact`（压缩较早的对话历史），返回压缩前后的 token 大小；目标必须空闲，忙则直接报 `busy`，不排队不重试。 |
@@ -81,6 +81,30 @@ pnpm --dir <你的 DSH profile 目录> add dsh-session-mailbox
 一个本进程**没有装载**的会话（冷会话）只能按**完整 id** 命中——它的标题和短名要靠活会话表，冷态下解析不出来。这类 id 通常来自 `list_workspaces` 的展开行（那里打 `session: <id>`，不含标题）。
 
 `send_session_message` / `rename_session` / `compact_session` 遇到冷 id 时，会用宿主的 `sessionController.resolveAgent` 把它从磁盘装载起来，再干活。装载是一次冷启动（读转录 → 解析并 mount agent preset → 发布 Agent），每会话一份，插件不提供卸载，直到 DSH 重启。
+
+### 行尾的「已回信 / 未回信」
+
+`[inactive]` 只说明「现在没在跑」，它同时可能是「干完了没汇报」「干到一半被打断」「早就没用了」。这一小段把它补上：
+
+```
+77de88cc [inactive] session-77de… — 给 mailbox 加 compact_session · 自上次派发（40 分钟）未回信
+9a1c2b3d [inactive] session-9a1c… — 市场条目改短并落分支 · 已回信（12 分钟前）
+```
+
+**单写点，双视角。** 每条消息都是经本插件发出的，所以记账只有一处：`send_session_message` 成功后记一条边 `from → to`。两个方向都从这张表按方向读：
+
+- 我最后发给 X 的时间 = 边 `我 → X`
+- X 最后发给我的时间 = 边 `X → 我`
+- 于是「它回过信」= **存在 `X → 我` 这条边**，不是去消息文本里认 `Agent <短名> sent a message:` 那种前缀（字符串格式一变就静默失效，结构信息不该降级成文本再猜回来）
+
+**落盘而不是内存。** 插件在宿主里是**单实例、根作用域**（`profile.bundles` 里的一条 insert，`apply` 每进程跑一次），进程内内存本来就互通；落文件是为了另外三条：重启不丢、同机多 profile 多进程能对上、以及「读」永远读当前事实而不是本进程的记忆。
+
+- 路径：`%LOCALAPPDATA%\dsh-session-mailbox\peers.json`（macOS `~/Library/Application Support/`，其余 `$XDG_STATE_HOME` 或 `~/.local/state`）；`SESSION_MAILBOX_STATE` 可覆盖整个目录（测试用）。
+- 写入：兄弟临时文件 + `rename` 覆盖，另留一份 `.bak`；主文件损坏时读回退到 `.bak`。
+- **读是纯读**：不建目录、不写、不清理、不修坏文件。淘汰只发生在写路径上。
+- 上限 **200 条边**，按最近使用淘汰（只在写时）。
+
+时间取消息自身的时刻（发信那一刻 / 事件落盘时宿主盖的 `event.time`），**不看文件 mtime**。显示粒度：不到 1 分钟、`N 分钟`、`N 小时`、`N 天`。
 
 ### 压缩一个会话
 
@@ -127,6 +151,10 @@ Agent a1b2c3d4 sent a message:
 
 ## 已知边界
 
+- **「未回信」是派生的，不是承诺**：它只说明「经本插件发出的最后一条消息之后，对方没有经本插件回过我」。对方用别的路子（用户自己打字、别的插件投递）回你，这里看不到；反过来，只有对方真正发回来才会出现「已回信」。所以这是**可见性**，不是收据。
+- **从没被本插件发过消息的会话，行尾什么都不会多**：没有边就没有这行字——用户自己开的会话不会被标红。
+- **记录读不到就当作「无记录」，绝不标「未回信」**：文件缺失、坏掉、或版本不认识时，`list_sessions` 照常出行，只是没有后缀；读取全程不写盘（不建目录、不修文件、不清理）。
+- **时间取消息时刻，不取文件 mtime**：发信用发信那一刻，入站用宿主落盘时盖的 `event.time`。所以整份文件被复制/触碰过，显示依然是对的。
 - **只在同一个 Host 进程内**：不同 DSH 实例、不同 CLI 进程之间互不可见。
 - **子代理只在 execute 期被拒**：`list_sessions` / `send_session_message` / `rename_session` 在 `execute` 里检查调用者，子代理调用会收到明确的报错；但**工具对子代理仍然可见**（它们出现在子代理的工具列表里），因为可见性是宿主注册表的事，不是插件能在执行期改的。子代理此刻该用的是 `send_message` / `list_agents`，它们操作的是子代理树。
 - **归档集合读不到就拒绝投递（fail-closed）**：投递前会读宿主的 `archivedSessionIds`；读不到（服务缺失或返回非数组）时报 `cannot verify the archived state of ...; refusing to deliver`，而不是当作「没归档」放行。`list_sessions` 在这种情况下退化成不筛归档，但投递仍会拒绝。

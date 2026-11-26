@@ -5,6 +5,8 @@ import z from '@deepseek-ai/schemastery'
 import * as pure from './lib/pure.js'
 import * as createLib from './lib/create.js'
 import * as compactLib from './lib/compact.js'
+import * as peersLib from './lib/peers.js'
+import { readPeers, recordSendEdge } from './lib/peerstore.js'
 import { deliverUnattributed } from './lib/deliver.js'
 
 export const name = 'session-mailbox'
@@ -120,6 +122,32 @@ export function apply(ctx, config = {}) {
     return { ok: true, agent }
   }
 
+  // ---- derived reply state ---------------------------------------------------
+  //
+  // One write point: `send_session_message` records the edge it just created.
+  // Both questions are then answered by direction — `me -> X` is what I sent,
+  // `X -> me` is what it sent — so "did it write back" is a row in the table, not
+  // a reading of the message text. Nothing here inspects `Agent <name> sent a
+  // message:` or any other prefix.
+  //
+  // The table lives on disk rather than in this closure: the instance is a single
+  // one per Host process, but a restart forgets memory, several Host processes can
+  // share one user, and a read should answer from current facts.
+  const replyTable = () => {
+    // Read-only by contract: peerstore never creates, prunes or repairs here.
+    const result = readPeers()
+    return result.kind === 'ok' || result.kind === 'recovered' ? result.entries : {}
+  }
+  const noteSend = (from, to, at) => {
+    // Bookkeeping must never break the delivery that triggered it, and must never
+    // turn a delivered message into a failed call.
+    try {
+      recordSendEdge({ from: String(from), to: String(to), at })
+    } catch {
+      /* the message is what matters; the label is derived from it */
+    }
+  }
+
   ctx.tools.register(defineTool({
     name: 'list_sessions',
     description: 'List the OTHER top-level sessions on this machine so you can message one; your own session is not listed. Each row prints a short `name` (the last 8 characters of the session id, longer only when two ids end alike), the full `id`, the session `title` (what a user usually names a session by), and whether that session is `running` or `inactive`. The `name` is an address, not a title, and `inactive` says nothing about whether its task succeeded. Archived sessions are not listed: they cannot receive messages until they are unarchived.',
@@ -138,16 +166,23 @@ export function apply(ctx, config = {}) {
             createdAt: { type: 'number', required: true },
             title: { type: 'string' },
             cwd: { type: 'string' },
+            reply: { type: 'string', enum: ['replied', 'awaiting'] },
+            replySince: { type: 'number' },
           },
         },
       },
+      // `reply`/`replySince` are absent unless a record exists, so a session the
+      // user opened themselves renders exactly as it did before this feature.
       render: (_args, list) => [{
         type: 'text',
         text: list.map((r) => {
           const head = `${r.name} [${r.status}] ${r.id}`
           const title = r.title === undefined ? '(untitled)' : r.title
           const where = r.cwd === undefined ? '' : ` · ${r.cwd}`
-          return `${head} — ${title}${where}`
+          const suffix = r.reply === undefined
+            ? ''
+            : peersLib.replySuffix({ stage: r.reply, since: r.replySince }, Date.now())
+          return `${head} — ${title}${where}${suffix}`
         }).join('\n'),
       }],
     },
@@ -159,9 +194,20 @@ export function apply(ctx, config = {}) {
         throw new Error('list_sessions is for top-level sessions; subagents see only their own subagent tree')
       }
       const selfId = exec.agent === undefined ? undefined : String(exec.agent.id)
+      // One read for the whole listing. A missing, unreadable or damaged file
+      // yields NO records — never "no reply" — because an unknown answer and a
+      // negative answer are different things to put in front of a user.
+      const table = replyTable()
       return liveRows()
         .filter((r) => r.id !== selfId)
         .sort((a, b) => b.createdAt - a.createdAt)
+        .map((row) => {
+          if (selfId === undefined) return row
+          const pair = peersLib.lookupPair(table, selfId, row.id)
+          const state = peersLib.replyState(pair)
+          if (state.stage === 'none') return row
+          return { ...row, reply: state.stage, replySince: state.since }
+        })
     },
   }))
 
@@ -304,6 +350,11 @@ export function apply(ctx, config = {}) {
       // running synchronously.
       const statusBefore = pure.pageStatus(target.status)
       const primitive = pure.primitiveFor(target.status)
+      // The instant the message is minted. Its `time` is stamped by the host when
+      // the event is appended (moments later, inside the target's log) and the
+      // sender cannot observe that value, so this is the closest true instant:
+      // still the message's own time, never a file's mtime.
+      const sentAt = Date.now()
       const message = createUserMessage({
         content: [{ type: 'text', text: pure.messageText(senderName, args.message, senderTitle) }],
         source: pure.messageSource(exec.agent.id),
@@ -315,6 +366,9 @@ export function apply(ctx, config = {}) {
         if (primitive === 'followup') target.followup(message)
         else target.steer(message)
       })
+      // The one write point for the reply state. Delivered already, so a failure
+      // here is a missing label, not a lost message.
+      noteSend(exec.agent.id, target.id, sentAt)
 
       return {
         queued: true,
