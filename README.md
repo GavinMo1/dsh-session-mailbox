@@ -12,7 +12,7 @@ DSH 里「一个会话」等于侧栏里的一行。默认情况下，一行不�
 - 想收尾时，模型看不到自己刚才开了哪些会话，也没有任何手段把它们从侧栏收走；
 - 会话之间的「标题」是给**人**看的（自动生成、随时可能变），模型手里唯一可用的地址只有一串 id。
 
-这个插件把这几条补上：**`list_sessions` 看见同类，`send_session_message` 说一句话过去，`rename_session` 把人话标题钉住，`create_session` / `list_workspaces` / `archive_sessions` / `delete_workspaces` 让「开一个、收一个」变成工具调用而不是手动点**。
+这个插件把这几条补上：**`list_sessions` 看见同类，`send_session_message` 说一句话过去，`rename_session` 把人话标题钉住，`compact_session` 把对面压一压，`create_session` / `list_workspaces` / `archive_sessions` / `delete_workspaces` 让「开一个、收一个」变成工具调用而不是手动点**。
 
 一次典型用法：主会话建一个子任务会话 → 给它一条首条消息让它开工 → 自己去干别的 → 对方做完回一条 `send_session_message` → 主会话把已经用完的会话 `archive_sessions` 收走。全程不需要用户切窗口。
 
@@ -61,13 +61,14 @@ pnpm --dir <你的 DSH profile 目录> add dsh-session-mailbox
 
 工具没出现、但插件没报错，通常是 bundle 没登记（`enabled` 与 `installed` 是两个字段：装了不等于启用了，启用也不等于登记了）。
 
-## 七个工具
+## 八个工具
 
 | 工具 | 一句话 |
 |---|---|
 | `list_sessions()` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、`title`、`running`/`inactive`、`cwd`；不列自己，不列已归档的会话。 |
 | `send_session_message({ agent, message })` | 给另一个 top-level 会话投一条纯文本，返回 `{ queued, to, name, statusBefore, primitive, woke }`，其中 `primitive` 说明这次是插进对方当前 step（`steer`）还是给它开新 turn（`followup`）。 |
 | `rename_session({ agent, title })` | 给另一个会话换标题；新标题是「用户来源」的，会**钉住**该会话，之后的自动标题生成不再覆盖它。 |
+| `compact_session({ agent })` | 对另一个会话跑宿主自己的 `/compact`（压缩较早的对话历史），返回压缩前后的 token 大小；目标必须空闲，忙则直接报 `busy`，不排队不重试。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> \| <title> \| <path> \| sessions: <n>`；给 `workspace`（id 或精确标题）就在该行后展开它的 `session: <id>` 行。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并挂到某个工作区（因此侧栏可见）；给 `prompt` 就立刻让它开始跑一轮。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档：离开侧栏，**转录仍在磁盘上**，可用宿主的 `unarchiveSession`（或 GUI）恢复。 |
@@ -79,7 +80,16 @@ pnpm --dir <你的 DSH profile 目录> add dsh-session-mailbox
 
 一个本进程**没有装载**的会话（冷会话）只能按**完整 id** 命中——它的标题和短名要靠活会话表，冷态下解析不出来。这类 id 通常来自 `list_workspaces` 的展开行（那里打 `session: <id>`，不含标题）。
 
-`send_session_message` 与 `rename_session` 遇到冷 id 时，会用宿主的 `sessionController.resolveAgent` 把它从磁盘装载起来，再干活。装载是一次冷启动（读转录 → 解析并 mount agent preset → 发布 Agent），每会话一份，插件不提供卸载，直到 DSH 重启。
+`send_session_message` / `rename_session` / `compact_session` 遇到冷 id 时，会用宿主的 `sessionController.resolveAgent` 把它从磁盘装载起来，再干活。装载是一次冷启动（读转录 → 解析并 mount agent preset → 发布 Agent），每会话一份，插件不提供卸载，直到 DSH 重启。
+
+### 压缩一个会话
+
+`compact_session` 不自己压：它把目标会话的 `Agent` 交给宿主的 `CommandRuntime.execute(agent, '/compact', [], signal)`，也就是 GUI 里敲 `/compact` 走的同一条路（命令由 `@deepseek-ai/dsh-command-compact` 注册，**不接受任何参数**）。因此：
+
+- **跨会话可行**：命令表视图是按 agent 分开的，命令记进的是**目标会话自己的日志**（`command/run` + `command/done`），这是正常生命周期，不是污染。
+- **目标必须空闲**：中途的会话宿主会回 `busy`（`ManualCompactionError`）。本插件不排队、不重试，直接把这句话报给调用方。注意 `agent.status` 在压缩进行中仍报 `idle`，所以插件只能预先挡掉「正在跑 turn」的会话，真正的并发保护在宿主侧。另外按本版宿主的源码，`dsh-compaction-basic` 把自己那条 `runMaintenance` 里出来的**任何**失败都重新包装成 `busy`，所以「摘要失败 / 落盘失败」大概率也以 busy 那句话出现——错误码在这个 backend 上不细分，要看细节得读目标会话日志里的 `compaction/end{error}`。
+- **大小从宿主的 token 计量器读**：`ctx.tokenMeter`（`@deepseek-ai/dsh-token-meter`）的 `measure(session).totalTokens` 取压缩前 / 压缩后，`contextPressure(session)` 取上下文窗口。取的是数字，不从命令返回的那句给人看的文案里抠。这台 DSH 没有挂 token 计量器时，工具会明说 `countSource: unavailable`，而不是编一个数出来。
+- **要求宿主编好了 `/compact`**：`ctx.get('commands')` 拿不到、或 `execute` 返回 `undefined`（宿主唯一可靠的「没这个命令」信号），都会以具名错误失败。
 
 ### 建、归档、删的语义要点
 
@@ -130,11 +140,14 @@ Agent a1b2c3d4 sent a message:
 - **`create_session` 对子代理不可用**：header 自报子代理、或 `subagents.rootOf` 指向别的 agent 时一律拒绝；`subagents` 服务取不到时也是拒绝，不是放行。
 - **`rename_session` 不能唤醒冷会话**：它只走活会话表解析，冷 id 在解析阶段就是 `notfound`。要给冷会话改名，先按完整 id 发一条消息把它唤醒。
 - **标题不是唯一地址**：命中多个一律拒绝。别名长度（短名）也只在本进程当前存活集合内唯一，且随集合变化可能改变。
+- **`compact_session` 会改写目标会话的历史**：它是唯一一个会改变另一个会话内容长度的工具。它不删磁盘上的转录文件（压缩由宿主的 compaction 语义负责），但目标会话的可见上下文会变短，且事后无法从这里撤回。
+- **压缩中的会话 `agent.status` 仍报 `idle`**：所以插件的「忙」预检只能挡掉正在跑 turn 的会话，真正的并发保护在宿主侧（回 `busy`）。这两层里，宿主那句才是权威。
+- **压缩前后的大小有三态**：`countSource: token-meter`（前后都读到）、`token-meter-partial`（只读到一端，缺失的那端**不填**）、`unavailable`（这台 DSH 没挂 token 计量器）。数字取 `tokenMeter.measure(session).totalTokens`（按日志重放，压缩落盘后立刻变），不是 `contextPressure().pressureTokens`——后者只报**上一次** LLM 调用的 prompt 大小，压缩后要等下一轮才会动。
 - **维护期（compaction 等）的会话**其 `agent.status` 仍报 `idle`，因此会被显示成 `inactive`。
 
 ## 卸载
 
-主路径：从 profile 的 `dsh.profile.bundles` 与 `dependencies` 各删一行 → `pnpm --dir <profile> install` → 重启。重启后工具列表里应**没有**这七个工具。只把 `enabled` 关掉不算卸载。
+主路径：从 profile 的 `dsh.profile.bundles` 与 `dependencies` 各删一行 → `pnpm --dir <profile> install` → 重启。重启后工具列表里应**没有**这八个工具。只把 `enabled` 关掉不算卸载。
 
 卸载**不会**回头修改既有转录：旧会话里仍然留着当时注入的系统提示词快照，以及 `source.kind === 'agent-message'` 的历史事件（这类事件也不进 `session export`，导出只取 `kind === 'user'` 的）。
 

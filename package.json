@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-mailbox",
-  "version": "0.10.1",
-  "description": "Give DeepSeek Harness sessions a mailbox: seven tools that let one top-level session list, message, rename, create, archive and unlist the sessions and workspaces around it.",
+  "version": "0.11.0",
+  "description": "Give DeepSeek Harness sessions a mailbox: eight tools that let one top-level session list, message, rename, compact, create, archive and unlist the sessions and workspaces around it.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -12,7 +12,8 @@
     "sessions",
     "mailbox",
     "messaging",
-    "multi-agent"
+    "multi-agent",
+    "compaction"
   ],
   "license": "MIT",
   "author": "GavinMo1",
