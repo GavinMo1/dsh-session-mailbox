@@ -89,6 +89,16 @@ node scripts/compat-check.mjs                           # 读 app.asar 断言宿
 | `cordis.patch.yml` | 让加载器往插件图里插一行 |
 | `README.md` / `AGENTS.md` / `DESIGN.md` | 用户 / Agent / 为什么 |
 
+## 发布到独立仓
+
+- 独立仓（`GavinMo1/dsh-session-mailbox`，本仓 remote 别名 `public`）是 `git subtree split --prefix=plugins/session-mailbox` 出来的，**根目录就是插件本体**。手动同步，没有自动化。
+- 顺序：`git tag dsh-session-mailbox/vX.Y.Z <含文档提交的 HEAD>` → `git subtree split --prefix=plugins/session-mailbox -b tmp-<ver> <同一个 commit>` → 推 main → 推 tag。
+- 推 main 之前**先确认快进**：`git ls-remote public refs/heads/main` 拿到的 hash 必须是 split 分支的祖先（`git merge-base --is-ancestor`）。**不是快进就停下来报告，不许 force**——那说明历史被人改过，force 会覆盖别人的东西。
+- **mirror 的 tag 指向 split 提交，不是 monorepo 提交**：`v0.10.x` 及更早的 tag 指向 monorepo 根，检出后连 `package.json` 都没有（`git cat-file -e <tag>:package.json` 可验），**在「只从 tag 发布」的口径下是废的，别拿它们当范例**。
+- **不能 `git push public --tags`**：同名 tag 在 mirror 指 split 提交、在 monorepo 指 monorepo 提交，`--tags` 会撞。按 refspec 显式推：`git push public <split-sha>:refs/tags/dsh-session-mailbox/vX.Y.Z`。
+- 不建 GitHub Release；mirror 的 README 不手改（与 monorepo 是同一份，随 split 走）。
+- 教训：旧做法（照抄 monorepo hash）本身就是错的，照着抄只会一直错下去。发现方向错了，用 `--force` 改**自己刚建的** tag 可以，动别人的不行。
+
 ## 别做的三件事
 
 - 别为了变绿放宽断言；也别在测试里碰真实状态目录。
