@@ -36,7 +36,10 @@
     "lib/",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/",
+    "!docs/research-*.md"
   ],
   "exports": {
     ".": "./index.js",
