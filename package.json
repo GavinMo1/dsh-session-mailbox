@@ -1,6 +1,10 @@
 {
   "name": "dsh-session-mailbox",
-  "version": "0.12.0",
+  "version": "0.13.0",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "npm test"
+  },
   "description": "Give DeepSeek Harness sessions a mailbox: eight tools that let one top-level session list, message, rename, compact, create, archive and unlist the sessions and workspaces around it.",
   "keywords": [
     "dsh",

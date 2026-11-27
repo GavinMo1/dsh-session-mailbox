@@ -57,7 +57,7 @@ Node `>=24.9.0`（与宿主一致）。宿主包由插件运行时按 profile �
 | `list_sessions()` | 列出本进程内其它 top-level 会话：短名 `name`（会话 id 末 8 位）、完整 `id`、`title`、`running`/`inactive`、`cwd`；不列自己，不列已归档的会话。和你交换过消息的会话，行尾还会多一小段「已回信 / 未回信」。 |
 | `send_session_message({ agent, message })` | 给另一个 top-level 会话投一条纯文本，返回 `{ queued, to, name, statusBefore, primitive, woke }`；`primitive` 说明这次是插进对方当前 step（`steer`）还是给它开新 turn（`followup`）。 |
 | `rename_session({ agent, title })` | 给另一个会话换标题；新标题是「用户来源」的，会**钉住**该会话，之后的自动标题生成不再覆盖它。 |
-| `compact_session({ agent })` | 对另一个会话跑宿主自己的 `/compact`（压缩较早的历史），返回压缩前后的 token 大小；目标必须空闲，忙则直接报 `busy`，不排队不重试。 |
+| `compact_session({ agent })` | 对另一个会话跑宿主自己的 `/compact`（压缩较早的历史）。**发起就返回** `{ status: 'started', agent, target, note }`：压缩在后台跑，压完会把「压缩完成：<会话> <before> → <after> tokens（窗口 <window>）」当一条消息发给你；没压成会说明原因并提示可以重发。判得起的错仍然当场报：目标忙 `busy`、找不到、已归档、没有命令运行时、子代理调用。不排队不重试；同一目标上一次还在压，第二次回 `already-running`。 |
 | `list_workspaces({ workspace? })` | 每行 `<id> \| <title> \| <path> \| sessions: <n>`；给 `workspace`（id 或精确标题）就在该行后展开它的 `session: <id>` 行。 |
 | `create_session({ path?, prompt? })` | 新建一个 top-level 会话并挂到某个工作区（因此侧栏可见）；给 `prompt` 就立刻让它开始跑一轮。 |
 | `archive_sessions({ sessionIds, stop? })` | 按 id 归档：离开侧栏，**转录仍在磁盘上**，可用宿主的 `unarchiveSession`（或 GUI）恢复。 |
@@ -70,6 +70,8 @@ Node `>=24.9.0`（与宿主一致）。宿主包由插件运行时按 profile �
 一个本进程**没有装载**的会话（冷会话）只能按**完整 id** 命中——它的标题和短名要靠活会话表，冷态下解析不出来。这类 id 通常来自 `list_workspaces` 的展开行（那里打 `session: <id>`，不含标题）。
 
 `send_session_message` / `rename_session` / `compact_session` 遇到冷 id 时，会用宿主的 `sessionController.resolveAgent` 把它从磁盘装载起来，再干活。装载是一次冷启动（读转录 → 解析并 mount agent preset → 发布 Agent），每会话一份，插件不提供卸载，直到 DSH 重启。
+
+`compact_session` 虽然不等压缩跑完，但**装载是在返回之前做完的**：对一个冷会话点名压缩，这一次调用可能仍要等一次冷启动。压缩本身才是被挪到后台的那一步。
 
 ### 一次典型用法
 

@@ -30,8 +30,8 @@
 4. **读路径纯读**：`readPeers` 不建目录、不写、不清理、不修坏文件，`.bak` 只在读坏主文件时回退。**淘汰只在写路径**（`peerstore.FILE_LIMIT`）。
 5. **读不到归档集合就拒绝投递**（fail-closed）：`workspaceRegistry.archivedSessionIds` 非数组 → 报 `cannot verify the archived state of …; refusing to deliver`，绝不当作「没归档」放行。
 6. **拒绝动调用者自己**：`archive_sessions` 没有越过的开关；`delete_workspaces` 的 `force: true` 也不许删掉持有调用者的工作区。
-7. **`compact_session` 不排队、不重试**：`busy` 原样透传给调用方。它可以预检「正在跑 turn」，但**不能**靠 `agent.status` 判断维护期——压缩进行中它仍报 `idle`。
-8. **数字三态，缺的一端不填**：`countSource: token-meter | token-meter-partial | unavailable`。没有计量器时明说不可用，**不编 0**。
+7. **`compact_session` 不排队、不重试，也不等待**：调用只负责「开压」就把 `status: 'started'` 返回，压缩结果稍后以一条消息送回**调用方**（`followup`，对方空闲与否都能收到）。`busy` 原样透传给调用方，且必须是**同步**失败——判得起的错（busy / 找不到 / 归档 / 没有命令运行时 / 子代理调用）一律走返回值或抛出，绝不留到那条通知里。它可以预检「正在跑 turn」，但**不能**靠 `agent.status` 判断维护期——压缩进行中它仍报 `idle`，所以「同一目标正在压」只能靠插件自己的内存集合（`compacting`）判断，第二次调用回 `already-running`。
+8. **数字三态，缺的一端不填**：压缩前后的读数只有三种结局——两端都有、只读得到一端、两端都读不到（没有 token 计量器）。它们现在只体现在**通知文案**里（返回值已不带计数，见第 7 条）：缺的一端写 `?`，两端都缺就明说「压了，但读不到前后大小」，**不编 0**。
 9. **消息来源只能是宿主那三键**：`{ kind: 'agent-message', form: 'relay', senderSessionId }`。多一个少一个键，宿主的会话格式校验会抛 `SessionFormatError`。
 10. **子代理在 `execute` 期被拒**，不是在注册期：工具对子代理仍然可见（可见性是宿主注册表的），由 `execute` 里检查并报错。
 11. **`lib/` 下只许 `node:` 内置**；测试只许 `node:test` + `node:assert`。这是它能被 `link:` 进没有 `node_modules` 的 profile 的前提。
@@ -42,12 +42,12 @@
 ```powershell
 node --check plugins/session-mailbox/index.js
 node --check plugins/session-mailbox/lib/*.js
-node --test plugins/session-mailbox/test/*.test.mjs     # 76 条
+node --test plugins/session-mailbox/test/*.test.mjs     # 82 条
 node scripts/compat-check.mjs                           # 读 app.asar 断言宿主接口
 ```
 
 - 测试只用 fake ctx / 临时 state 目录（`SESSION_MAILBOX_STATE` 覆盖），不碰真实状态。
-- `index.js` 的编排、冷路径装载、真实落盘只能靠实际运行看——测试覆盖的是 `lib/` 的纯函数与投递步骤。
+- `index.js` 的编排、冷路径装载、真实落盘只能靠实际运行看——测试覆盖的是 `lib/` 的纯函数与投递步骤。**唯一例外是 `compact_session` 的异步边界**：它是个时序性质，跑起来看不出来，所以 `test/compact-async.test.mjs` 用 fake ctx 直接驱动工具本体（fake 的 `commands.execute` 永不 resolve，断言调用照样立刻返回）。那里的两个 fixture 只是为了让 `index.js` 能被 import（一条 `schemastery` 解析映射 + 一个临时 anchor 里的两行宿主包桩），不是依赖。
 - **热加载**：`dsh-hmr` 不跟踪 junction。改完源码要 `plugin_manager` `set_plugin`（`target` 填 `entryId`，即 `include:<rowId>`）关一次再开，或重启 DSH。
 - **热加载顺序**：先把自己要发的消息发出去，再 reload——关掉这个插件的那一瞬间，`send_session_message` 也一起消失（同一个插件提供的）。
 
@@ -56,7 +56,10 @@ node scripts/compat-check.mjs                           # 读 app.asar 断言宿
 | 你看到的 | 真因 | 看哪里 |
 |---|---|---|
 | `compact_session` 报 `busy` | **不是故障**：目标会话正在跑一轮，或正在维护。错误码在本版 `dsh-compaction-basic` 上不细分（摘要失败/落盘失败也被重包成 `busy`） | 目标会话自己的日志里 `compaction/end{error}` |
-| `compact_session` 成功但 `countSource: unavailable` | 这台 DSH 没挂 token 计量器，不是压缩没发生 | `ctx.get('tokenMeter')`；`dsh-token-meter` 是否在 bundles 里 |
+| `compact_session` 成功但通知里写「读不到前后大小」 | 这台 DSH 没挂 token 计量器，不是压缩没发生 | `ctx.get('tokenMeter')`；`dsh-token-meter` 是否在 bundles 里 |
+| `compact_session` 返回 `started` 后再没消息来 | 见「已知盲点」：DSH 在压缩途中重启，那次不会有完成通知——**当没压处理**，重发一次即可 | 目标会话日志里有没有 `compaction/end` |
+| 同一目标连着调两次，第二次 `already-running` | 上一次还在压。不排队不重试，等第一条通知 | 通知里的 `压缩完成：` / `这次没压成：` |
+| 通知落在调用方「跑了很久的那一轮」后面 | 通知走 `followup`（下一轮/下一步才读），**故意不用 `steer`**：状态消息不该插进别人正在做的那一步 | `lib/` 无涉；看 `notifyCaller` |
 | 行尾没有「已回信」 | 无记录：从没经本插件发过，或文件缺失/损坏/版本不认识。**这是设计**，不是漏显示 | `%LOCALAPPDATA%\dsh-session-mailbox\peers.json`；`SESSION_MAILBOX_STATE` 指到哪了 |
 | 一直「未回信」但对方坚持回了 | 对方不是**经本插件**回的（用户自己打字、别的插件投递），或回的那条还没落进对方日志 | 同上文件里有没有 `对方id\|自己id` 那条边 |
 | 工具一个都没有，插件却加载成功 | 漏了 `ctx.tools.register`；或 bundle 没登记（`enabled` ≠ `installed` ≠ 已登记） | profile `package.json` 的 `dsh.profile.bundles` |
@@ -65,6 +68,11 @@ node scripts/compat-check.mjs                           # 读 app.asar 断言宿
 | `ambiguous session "…"` | 地址命中多个（标题不是唯一地址） | 用完整 `id` 重试 |
 | `session not accounted` | `create_session` 建完回读工作区账目没看到它 | `workspaceRegistry.get(<workspaceId>).sessionIds` |
 | `ERR_MODULE_NOT_FOUND: @deepseek-ai/…` | 裸 import 从 profile 解析不到 | 必须 `createRequire(anchor)`，anchor 来自 `profileContext.installAnchor` |
+
+## 已知盲点
+
+- **重启丢通知**：`compact_session` 的完成通知只是内存里一个 detached 任务的结果。DSH 重启时正在压的那次不会有完成通知，调用方按没压处理（重发一次即可）。不做工程化补救——进程都没了，那次压缩本来也没跑完，补一条「可能压了也可能没压」的记录比沉默更误导。
+- **跨进程看不见**：`compacting` 集合是进程内存，桌面端与 web/qqbot 各有一个 Host 进程，互相不知道对方在压同一个目标。同一进程内重复调用已被挡下；跨进程重复压缩由宿主的 `/compact` 自己报 `busy`。
 
 ## peer 范围怎么维护
 
